@@ -26,6 +26,7 @@ namespace VirtualFootTracking.Biomechanics
         [SerializeField] private bool _enableFloorClamp = true;
         [SerializeField] private bool _enableFootLocking = true;
         [SerializeField] private bool _enableAnatomicalIk = true;
+        [SerializeField] private bool _enableDepthLegFusion = true;
 
         [Header("Stance / Swing Hysteresis")]
         [SerializeField] private float _stanceEnterSoleHeightMeters = 0.045f;
@@ -45,15 +46,22 @@ namespace VirtualFootTracking.Biomechanics
             public bool IsFootLocked;
             public Vector2 LockedXZ;
             public float LockedYawDeg;
+            public float DepthBlendWeight;
+            public Vector3 LastDepthFootPos;
+            public Vector3 LastDepthKneePos;
+            public bool LastDepthHasKnee;
+            public bool LastDepthIsKneeDominant;
+            public float LastDepthConfidence;
         }
 
         private CalibrationProfile _profile = new CalibrationProfile();
         private ISpatialMappingProvider _spatialProvider;
+        private DepthObservationFrame _latestDepth;
         private FootState _leftState;
         private FootState _rightState;
         private long _frameIndex;
 
-        public string SolverName => "Phase2.ProprietaryFootTrackingSolver";
+        public string SolverName => "Phase3.ProprietaryDepthFusionSolver";
 
         public bool EnableFloorClamp
         {
@@ -81,14 +89,26 @@ namespace VirtualFootTracking.Biomechanics
             set => _enableAnatomicalIk = value;
         }
 
+        public bool EnableDepthLegFusion
+        {
+            get => _enableDepthLegFusion;
+            set => _enableDepthLegFusion = value;
+        }
+
         public void SetSpatialMappingProvider(ISpatialMappingProvider spatialProvider)
         {
             _spatialProvider = spatialProvider;
         }
 
+        public void SetLatestDepthObservation(in DepthObservationFrame depthFrame)
+        {
+            _latestDepth = depthFrame;
+        }
+
         public void Initialize(CalibrationProfile profile)
         {
             _profile = profile ?? new CalibrationProfile();
+            _latestDepth = default;
             _leftState = default;
             _rightState = default;
             _frameIndex = 0;
@@ -248,6 +268,65 @@ namespace VirtualFootTracking.Biomechanics
 
             float localFloorY = QueryFloorY(rawTargetAnkle, defaultFloorY);
 
+            // Depth API real-time leg/kick fusion
+            DepthLegObservation depthLeg = isLeft ? _latestDepth.LeftLeg : _latestDepth.RightLeg;
+            float dtSafe = Mathf.Max(deltaTime, 0.001f);
+            bool depthIndicatesSwing = false;
+            if (depthLeg.IsDetected)
+            {
+                float horizFromHip = Vector2.Distance(
+                    new Vector2(depthLeg.FootWorldPosition.x, depthLeg.FootWorldPosition.z),
+                    new Vector2(hipPos.x, hipPos.z));
+                depthIndicatesSwing =
+                    depthLeg.IsKneeDominant ||
+                    depthLeg.FootWorldPosition.y > localFloorY + ankleHeightOffset + 0.095f ||
+                    horizFromHip > 0.22f;
+            }
+
+            if (_enableDepthLegFusion && _latestDepth.IsReady && depthLeg.IsDetected && (depthIndicatesSwing || !state.IsFootLocked))
+            {
+                if (state.DepthBlendWeight <= 0.001f)
+                {
+                    state.LastDepthFootPos = depthLeg.FootWorldPosition;
+                    state.LastDepthKneePos = depthLeg.KneeWorldPosition;
+                }
+                else
+                {
+                    float smoothT = Mathf.Clamp01(dtSafe * 28f);
+                    state.LastDepthFootPos = Vector3.Lerp(state.LastDepthFootPos, depthLeg.FootWorldPosition, smoothT);
+                    if (depthLeg.HasKneeHint)
+                    {
+                        state.LastDepthKneePos = state.LastDepthHasKnee
+                            ? Vector3.Lerp(state.LastDepthKneePos, depthLeg.KneeWorldPosition, smoothT)
+                            : depthLeg.KneeWorldPosition;
+                    }
+                }
+
+                state.LastDepthHasKnee = depthLeg.HasKneeHint;
+                state.LastDepthIsKneeDominant = depthLeg.IsKneeDominant;
+                state.LastDepthConfidence = depthLeg.Confidence;
+                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 1f, dtSafe * 8.5f);
+            }
+            else
+            {
+                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 0f, dtSafe * 5.5f);
+            }
+
+            bool depthDrivingLeg = _enableDepthLegFusion && state.DepthBlendWeight > 0.01f;
+            if (depthDrivingLeg)
+            {
+                rawTargetAnkle = Vector3.Lerp(rawTargetAnkle, state.LastDepthFootPos, state.DepthBlendWeight);
+                Vector3 kickHoriz = Vector3.ProjectOnPlane(rawTargetAnkle - hipPos, Vector3.up);
+                if (kickHoriz.sqrMagnitude > 0.015f)
+                {
+                    Vector3 kickFwd = kickHoriz.normalized;
+                    footForwardFlat = Vector3.Slerp(footForwardFlat, kickFwd, state.DepthBlendWeight).normalized;
+                    Quaternion kickRot = Quaternion.LookRotation(footForwardFlat, Vector3.up);
+                    rawFootRot = Quaternion.Slerp(rawFootRot, kickRot, state.DepthBlendWeight);
+                }
+                localFloorY = QueryFloorY(rawTargetAnkle, defaultFloorY);
+            }
+
             // Compute raw speed for stance/swing classification.
             float rawSpeed = 0f;
             if (state.HasPrevRaw && deltaTime > 0.0001f)
@@ -262,7 +341,12 @@ namespace VirtualFootTracking.Biomechanics
             float rawSoleClearance = rawTargetAnkle.y - ankleHeightOffset - localFloorY;
 
             // Hysteresis state machine for Stance (locked to floor) vs Swing (free 3D motion).
-            if (_enableFootLocking && hasSdkAnkle)
+            bool allowFloorLock = _enableFootLocking && hasSdkAnkle && !(state.DepthBlendWeight > 0.15f && depthIndicatesSwing);
+            if (!allowFloorLock)
+            {
+                state.IsFootLocked = false;
+            }
+            else
             {
                 if (!state.IsFootLocked)
                 {
@@ -283,10 +367,6 @@ namespace VirtualFootTracking.Biomechanics
                         state.IsFootLocked = false;
                     }
                 }
-            }
-            else
-            {
-                state.IsFootLocked = false;
             }
 
             Vector3 targetAnkle = rawTargetAnkle;
@@ -311,15 +391,28 @@ namespace VirtualFootTracking.Biomechanics
             Vector3 solvedKnee;
             Quaternion solvedKneeRot;
             bool ikSolved = false;
+            bool depthProvenanceActive = _enableDepthLegFusion && state.DepthBlendWeight >= 0.35f;
+
+            bool useKneeHint = hasSdkKnee || (depthProvenanceActive && state.LastDepthHasKnee);
+            Vector3 kneeHintPos = hasSdkKnee ? sdkKnee.WorldPosition : Vector3.zero;
+            if (depthProvenanceActive && state.LastDepthHasKnee)
+            {
+                float hintWeight = state.LastDepthIsKneeDominant
+                    ? state.DepthBlendWeight
+                    : state.DepthBlendWeight * 0.8f;
+                kneeHintPos = hasSdkKnee
+                    ? Vector3.Lerp(sdkKnee.WorldPosition, state.LastDepthKneePos, hintWeight)
+                    : state.LastDepthKneePos;
+            }
 
             if (_enableAnatomicalIk)
             {
-                Vector3 anteriorPole = Vector3.Slerp(pelvisForwardFlat, footForwardFlat, 0.45f).normalized;
+                Vector3 anteriorPole = Vector3.Slerp(pelvisForwardFlat, footForwardFlat, 0.55f).normalized;
                 LegIkResult ik = AnalyticLegIkSolver.Solve(
                     hipPos,
                     targetAnkle,
-                    hasSdkKnee ? sdkKnee.WorldPosition : Vector3.zero,
-                    hasSdkKnee,
+                    kneeHintPos,
+                    useKneeHint,
                     anteriorPole,
                     _profile.ThighLengthMeters,
                     _profile.ShinLengthMeters);
@@ -341,7 +434,9 @@ namespace VirtualFootTracking.Biomechanics
             }
             else
             {
-                solvedKnee = hasSdkKnee ? sdkKnee.WorldPosition : Vector3.Lerp(hipPos, solvedAnkle, 0.5f) + pelvisForwardFlat * 0.08f;
+                solvedKnee = useKneeHint
+                    ? kneeHintPos
+                    : Vector3.Lerp(hipPos, solvedAnkle, 0.5f) + pelvisForwardFlat * 0.08f;
                 solvedKneeRot = hasSdkKnee && sdkKnee.OrientationValid ? sdkKnee.WorldRotation : Quaternion.LookRotation(pelvisForwardFlat, Vector3.up);
             }
 
@@ -381,15 +476,36 @@ namespace VirtualFootTracking.Biomechanics
             float finalSoleClearance = finalFootPos.y - ankleHeightOffset - localFloorY;
             bool isGrounded = footLocked || finalSoleClearance <= _stanceEnterSoleHeightMeters;
 
-            TrackerValidityState footValidity = hasSdkAnkle
-                ? (skeleton.Confidence >= 0.35f ? TrackerValidityState.Valid : TrackerValidityState.Degraded)
-                : TrackerValidityState.Degraded;
+            TrackingDataSource finalFootSource;
+            TrackingDataSource finalKneeSource;
+            TrackerValidityState footValidity;
+            TrackerValidityState kneeValidity;
+            float footConfidence;
+            float kneeConfidence;
 
-            TrackerValidityState kneeValidity = hasSdkKnee || ikSolved
-                ? (hasSdkKnee && skeleton.Confidence >= 0.35f ? TrackerValidityState.Valid : TrackerValidityState.Degraded)
-                : TrackerValidityState.Invalid;
-
-            float kneeConfidence = hasSdkKnee ? skeleton.Confidence : (ikSolved ? Mathf.Max(0.45f, skeleton.Confidence * 0.7f) : 0f);
+            if (depthProvenanceActive)
+            {
+                finalFootSource = TrackingDataSource.DepthObserved;
+                finalKneeSource = TrackingDataSource.DepthObserved;
+                footValidity = TrackerValidityState.Valid;
+                kneeValidity = TrackerValidityState.Valid;
+                float dConf = Mathf.Max(state.LastDepthConfidence, 0.65f);
+                footConfidence = dConf;
+                kneeConfidence = dConf;
+            }
+            else
+            {
+                finalFootSource = footSource;
+                finalKneeSource = hasSdkKnee ? sdkKnee.DataSource : TrackingDataSource.EngineBiomechanicalFallback;
+                footValidity = hasSdkAnkle
+                    ? (skeleton.Confidence >= 0.35f ? TrackerValidityState.Valid : TrackerValidityState.Degraded)
+                    : TrackerValidityState.Degraded;
+                kneeValidity = hasSdkKnee || ikSolved
+                    ? (hasSdkKnee && skeleton.Confidence >= 0.35f ? TrackerValidityState.Valid : TrackerValidityState.Degraded)
+                    : TrackerValidityState.Invalid;
+                footConfidence = hasSdkAnkle ? skeleton.Confidence : 0.45f;
+                kneeConfidence = hasSdkKnee ? skeleton.Confidence : (ikSolved ? Mathf.Max(0.45f, skeleton.Confidence * 0.7f) : 0f);
+            }
 
             footSample = new VirtualTrackerSample
             {
@@ -400,8 +516,8 @@ namespace VirtualFootTracking.Biomechanics
                 AngularVelocity = Vector3.zero,
                 TimestampSeconds = timestampSeconds,
                 Validity = footValidity,
-                Source = footSource,
-                Confidence = hasSdkAnkle ? skeleton.Confidence : 0.45f,
+                Source = finalFootSource,
+                Confidence = footConfidence,
                 Space = CoordinateSpace.UnityWorldSpace,
                 HeightAboveFloorMeters = finalSoleClearance,
                 IsGrounded = isGrounded,
@@ -419,7 +535,7 @@ namespace VirtualFootTracking.Biomechanics
                 AngularVelocity = Vector3.zero,
                 TimestampSeconds = timestampSeconds,
                 Validity = kneeValidity,
-                Source = hasSdkKnee ? sdkKnee.DataSource : TrackingDataSource.EngineBiomechanicalFallback,
+                Source = finalKneeSource,
                 Confidence = kneeConfidence,
                 Space = CoordinateSpace.UnityWorldSpace,
                 HeightAboveFloorMeters = finalKneePos.y - localFloorY,

@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($ApkPath)) {
-    $ApkPath = Join-Path $ProjectPath "Builds\VirtualFootTracking_v0.2_Engine.apk"
+    $ApkPath = Join-Path $ProjectPath "Builds\VirtualFootTracking_v0.3_Depth.apk"
 }
 
 $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source

@@ -90,7 +90,7 @@ if (Test-Path $LogFile) {
     }
 }
 
-$apkPath = Join-Path $ProjectPath "Builds\VirtualFootTracking_v0.2_Engine.apk"
+$apkPath = Join-Path $ProjectPath "Builds\VirtualFootTracking_v0.3_Depth.apk"
 if ($exitCode -eq 0 -and (Test-Path $apkPath)) {
     $sizeMb = [math]::Round((Get-Item $apkPath).Length / 1MB, 2)
     Write-Host "`nSUCCESS: APK generated at $apkPath ($sizeMb MB)"

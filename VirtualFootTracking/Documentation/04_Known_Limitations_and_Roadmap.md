@@ -2,20 +2,26 @@
 
 ## 1. Limitações Conhecidas de Hardware e SDK (Meta Quest 3S)
 
-1. **Ausência de câmeras ópticas voltadas aos pés:**
-   - O Quest 3S utiliza IOBT (Inside-Out Body Tracking) para torso, ombros, cotovelos, punhos e cabeça (`SdkObserved`), mas as juntas inferiores (`70..83`: quadris/coxas, joelhos, tornozelos e pontas dos pés) são inferidas pelo modelo **Generative Legs** da Meta (`SdkEstimatedGenerativeLegs`).
-   - Movimentos explosivos de combate (chutes frontais altos, chutes laterais rápidos, cruzamento de pernas e giros fechados) não são observados diretamente pelas câmeras do headset e podem apresentar atraso, amplitude reduzida ou leve deriva vertical em relação ao chão real.
+1. **Cobertura Física da Depth API vs. Oclusão fora do Frustum (`v0.3.0`):**
+   - O Quest 3S possui câmeras de profundidade voltadas para a **frente** (e não câmeras 360° ou apontadas diretamente abaixo da vertical `-90°` quando o usuário olha para o horizonte).
+   - O detector `EnvironmentDepthLegDetector` utiliza uma grade de escaneamento frontal (`11×8`, `-36°..+36°` horizontal, `-46°..+6°` vertical, alcance `0,20–2,3 m`). Portanto:
+     - **Detecta diretamente em 3D (`DEPTH_3D`):** chutes frontais/diagonais, elevação frontal de joelhos e pés erguidos à frente (especialmente ao olhar levemente para baixo ou ao chutar acima de ~25°).
+     - **Não observa diretamente (`SdkEstimatedGenerativeLegs`):** chutes para trás das costas, aberturas laterais extremas fora do FOV das câmeras, ou pés diretamente sob a vertical ao olhar para o teto. Nesses momentos, a engine retorna suavemente (`~0,18 s`) para `Generative Legs + IK`.
+   - Objetos móveis não presentes no escaneamento de ambiente podem gerar falsos positivos se estiverem exatamente no alcance das pernas (`0,2–1,1 m`); para eliminar cadeiras/mesas próximas, recomenda-se usar **CAPTURAR FUNDO DEPTH (1,5s)** (ou clique no **Analógico Esquerdo**) olhando para a área livre antes dos chutes.
 
-2. **Pré-requisito de Mapeamento de Cômodo (MRUK / Scene API):**
-   - `MRUKRoom.FloorAnchors` só retorna âncoras reais se o usuário tiver executado o **Room/Space Setup** no Quest 3S e concedido `com.oculus.permission.USE_SCENE`.
-   - Quando a sala não foi escaneada ou a permissão foi negada, o sistema entra explicitamente em `FloorDataSource.TrackingOriginFallback` (altura `trackingSpace.position.y`), indicado em âmbar no HUD e no piso virtual.
+2. **Ausência de câmeras ópticas dedicadas aos pés (`OVRBody`):**
+   - As juntas inferiores (`70..83`: quadris/coxas, joelhos, tornozelos e pontas dos pés) do `OVRBody` são inferidas pelo modelo **Generative Legs** da Meta (`SdkEstimatedGenerativeLegs`). O modo **Depth Leg Fusion (`v0.3.0`)** complementa essa limitação sempre que a perna entra no campo visual das câmeras frontais.
 
-3. **Iluminação e Oclusão do IOBT:**
-   - Rastreamento IOBT degrada em ambientes escuros, roupas muito largas ou quando os braços ocultam o torso das câmeras inferiores do headset.
+3. **Pré-requisito de Mapeamento de Cômodo (MRUK / Scene API):**
+   - `MRUKRoom.FloorAnchors` e `EnvironmentRaycastManager` requerem `com.oculus.permission.USE_SCENE` (e, para âncoras de sala/móveis, **Room/Space Setup** concluído no Quest 3S).
+   - Quando a sala não foi escaneada ou a permissão foi negada, o piso entra explicitamente em `FloorDataSource.TrackingOriginFallback` (altura `trackingSpace.position.y`), indicado em âmbar no HUD e no piso virtual.
 
-4. **Limites de Predição e Fallback (`v0.2.0`):**
+4. **Iluminação e Oclusão:**
+   - Tanto o IOBT quanto a reconstrução de profundidade perdem qualidade em ambientes muito escuros ou contra superfícies transparentes/espelhadas.
+
+5. **Limites de Predição e Comunicação Externa (`v0.3.0`):**
    - `AdaptiveKalmanMotionPredictor` extrapola perdas temporárias por no máximo `0,35s` com decaimento exponencial de velocidade (`EngineMotionPredicted`) e depois retorna `Invalid` para não simular dados inexistentes.
-   - A transmissão externa via Wi-Fi UDP/USB para o driver SteamVR OpenVR (`GenericTracker`) pertence à Etapa 3.
+   - A transmissão externa via Wi-Fi UDP/USB para o driver SteamVR OpenVR (`GenericTracker`) pertence à Etapa 4.
 
 ---
 
@@ -24,16 +30,16 @@
 ### Etapa 1 — Validação Diagnóstica no Quest 3S (**Concluída em `v0.1.0-diag`**)
 - Compilado `VirtualFootTracking_v0.1_Diag.apk` (`46,46 MB`) e validado pelo usuário no Quest 3S em hardware real (esqueleto IOBT + Generative Legs em pé e sentado + piso/passthrough).
 
-### Etapa 2 — Foot Tracking Engine Próprio (**Implementada em `v0.2.0-engine`**)
-- **Solver Biomecânico & IK (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`):**
-  - Reconstrução analítica 2-bone (`Quadril -> Joelho -> Tornozelo`) respeitando comprimentos calibrados de coxa/canela e limites anatômicos (`2°–148°`) sem inversão do joelho.
-  - Detecção de fase *Stance* vs *Swing* com histerese e *Foot Locking* elástico ancorado no piso MRUK (evita penetração e deslizamento parado, soltando imediatamente em chutes rápidos).
-- **Predição e Filtragem (`AdaptiveKalmanMotionPredictor`):**
-  - Filtro de Kalman com ganho adaptativo por inovação/velocidade e extrapolação amortecida (até `0,35s`) marcada explicitamente como `TrackingDataSource.EngineMotionPredicted`.
-- **Interface VR Completa (`VirtualFootTrackingVrUi` + `VrControllerLaserPointer`) & Calibração (`GuidedCalibrationProvider`):**
-  - 5 painéis interativos por raio laser nos controles Touch Plus (Menu Principal, Calibração guiada `2,5s` + ajustes manuais, Live Tracking com alternância A/B, Configurações/Offsets e Diagnóstico completo).
+### Etapa 2 — Foot Tracking Engine Próprio (**Concluída em `v0.2.0-engine`**)
+- Compilado `VirtualFootTracking_v0.2_Engine.apk` (`46,51 MB`) e validado no Quest 3S (~90% de precisão em caminhada/apoio no piso, confirmando que `Generative Legs` não enxergava chutes nem elevação isolada de joelhos).
+- **Solver Biomecânico & IK (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`) + Kalman Adaptativo + UI VR completa.**
 
-### Etapa 3 — Streaming PC + Driver SteamVR OpenVR
+### Etapa 3 — Detecção Física de Chutes & Joelhos via Depth API (**Implementada em `v0.3.0-depth`**)
+- **`EnvironmentDepthLegDetector`:** Raycasting Depth em tempo real (`EnvironmentRaycastManager`), subtração de piso/tronco/braços/mãos/móveis e extração de alvo de pé/chute/joelho erguido.
+- **Fusão Multi-Sensor no `ProprietaryFootTrackingSolver`:** destravamento automático do piso (`IsFootLocked = false`) e proveniência **`TrackingDataSource.DepthObserved` (`DEPTH_3D`, Amarelo)**.
+- **Visualização & UI:** nuvem 3D ao vivo de pontos de profundidade nas pernas e botões de captura de fundo estático no headset.
+
+### Etapa 4 — Streaming PC + Driver SteamVR OpenVR
 - Implementar `UdpTrackerOutput` (Wi-Fi UDP baixa latência + fallback USB `adb forward`) serializando `TrackerPacketFrame` (`VFT1`).
 - Sincronização de timestamps Quest ↔ PC e detecção de perda/reordenação de pacotes.
 - Driver nativo C++ para SteamVR (OpenVR `IServerTrackedDeviceProvider`) expondo os quatro dispositivos como `TrackedDeviceClass_GenericTracker` (Pés e Joelhos) compatíveis com VRChat e jogos de combate PCVR.

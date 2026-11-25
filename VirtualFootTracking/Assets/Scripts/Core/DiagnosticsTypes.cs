@@ -28,6 +28,16 @@ namespace VirtualFootTracking.Core
         public TrackingEngineMode ActiveEngineMode;
         public bool KalmanPredictorEnabled;
         public string ActiveSolverName;
+        public bool DepthSupported;
+        public bool DepthReady;
+        public bool DepthFusionEnabled;
+        public bool DepthCapturingBackground;
+        public int DepthBaselineVoxelCount;
+        public int DepthRawHitCount;
+        public int DepthForegroundPointCount;
+        public int DepthLeftHits;
+        public int DepthRightHits;
+        public string DepthStatusMessage;
         public string StatusMessage;
         public string[] RecentErrors;
     }

@@ -6,6 +6,7 @@ using VirtualFootTracking.Biomechanics;
 using VirtualFootTracking.Calibration;
 using VirtualFootTracking.Core;
 using VirtualFootTracking.Prediction;
+using VirtualFootTracking.SpatialMapping;
 
 namespace VirtualFootTracking.Visualization
 {
@@ -55,6 +56,9 @@ namespace VirtualFootTracking.Visualization
         private Text _liveMirrorBtnText;
         private Text _liveLockBtnText;
         private Text _liveKalmanBtnText;
+        private Text _liveDepthBtnText;
+        private Text _liveCloudBtnText;
+        private Text _liveBgBtnText;
         private Text _liveTrackersSummaryText;
 
         private Text _diagTelemetryText;
@@ -74,6 +78,7 @@ namespace VirtualFootTracking.Visualization
         private ProprietaryFootTrackingSolver _proprietarySolver;
         private AdaptiveKalmanMotionPredictor _kalman;
         private SkeletonAndTrackerVisualizer _visualizer;
+        private EnvironmentDepthLegDetector _depthDetector;
         private Func<TrackingEngineMode> _getEngineMode;
         private Action<TrackingEngineMode> _setEngineMode;
         private Action _onReloadMruk;
@@ -89,6 +94,7 @@ namespace VirtualFootTracking.Visualization
             ProprietaryFootTrackingSolver proprietarySolver,
             AdaptiveKalmanMotionPredictor kalman,
             SkeletonAndTrackerVisualizer visualizer,
+            EnvironmentDepthLegDetector depthDetector,
             Func<TrackingEngineMode> getEngineMode,
             Action<TrackingEngineMode> setEngineMode,
             Action onReloadMruk,
@@ -99,6 +105,7 @@ namespace VirtualFootTracking.Visualization
             _proprietarySolver = proprietarySolver;
             _kalman = kalman;
             _visualizer = visualizer;
+            _depthDetector = depthDetector;
             _getEngineMode = getEngineMode;
             _setEngineMode = setEngineMode;
             _onReloadMruk = onReloadMruk;
@@ -134,7 +141,7 @@ namespace VirtualFootTracking.Visualization
 
             if (screen == VrUiScreen.LiveTracking)
             {
-                _canvasRect.sizeDelta = new Vector2(1020f, 235f);
+                _canvasRect.sizeDelta = new Vector2(1020f, 320f);
                 _bgImage.color = new Color(0.03f, 0.05f, 0.09f, 0.78f);
             }
             else
@@ -221,7 +228,7 @@ namespace VirtualFootTracking.Visualization
         private void BuildTopNavBar()
         {
             RectTransform bar = CreatePanel(_canvasRect, "TopNavBar", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -66f), new Vector2(-16f, -12f), new Color(0.06f, 0.11f, 0.18f, 0.95f));
-            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.2</color></b>", 20, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
+            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.3 DEPTH</color></b>", 19, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
 
             CreateButton(bar, "NavMenu", "MENU", new Vector2(0.37f, 0.12f), new Vector2(0.47f, 0.88f), new Color(0.14f, 0.24f, 0.36f), () => SetScreen(VrUiScreen.MainMenu), 15);
             CreateButton(bar, "NavLive", "LIVE", new Vector2(0.48f, 0.12f), new Vector2(0.58f, 0.88f), new Color(0.10f, 0.42f, 0.32f), () => SetScreen(VrUiScreen.LiveTracking), 15);
@@ -240,17 +247,17 @@ namespace VirtualFootTracking.Visualization
             _mainBodyCardText = CreateText(card1, "BodyCardTxt", "", 17, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14f, 12f), new Vector2(-14f, -12f));
 
             RectTransform card2 = CreatePanel(p, "SceneCard", new Vector2(0.345f, 0.66f), new Vector2(0.655f, 0.96f), Vector2.zero, Vector2.zero, new Color(0.07f, 0.12f, 0.19f, 0.95f));
-            _mainSceneCardText = CreateText(card2, "SceneCardTxt", "", 17, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14f, 12f), new Vector2(-14f, -12f));
+            _mainSceneCardText = CreateText(card2, "SceneCardTxt", "", 16, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14f, 12f), new Vector2(-14f, -12f));
 
             RectTransform card3 = CreatePanel(p, "TrackersCard", new Vector2(0.67f, 0.66f), new Vector2(0.98f, 0.96f), Vector2.zero, Vector2.zero, new Color(0.07f, 0.12f, 0.19f, 0.95f));
             _mainTrackersCardText = CreateText(card3, "TrackersCardTxt", "", 17, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14f, 12f), new Vector2(-14f, -12f));
 
-            CreateButton(p, "BtnStartLive", "INICIAR LIVE TRACKING\n<size=15>(Motor Proprio IK + Kalman)</size>", new Vector2(0.04f, 0.36f), new Vector2(0.49f, 0.60f), new Color(0.09f, 0.48f, 0.34f), () => SetScreen(VrUiScreen.LiveTracking), 22);
-            CreateButton(p, "BtnCalibration", "CALIBRACAO GUIADA & MANUAL\n<size=15>(Altura, Coxas, Canelas, Pes)</size>", new Vector2(0.51f, 0.36f), new Vector2(0.96f, 0.60f), new Color(0.14f, 0.34f, 0.56f), () => SetScreen(VrUiScreen.Calibration), 22);
-            CreateButton(p, "BtnSettings", "CONFIGURACOES & OFFSETS\n<size=15>(Foot Lock, Floor Clamp, Offsets)</size>", new Vector2(0.04f, 0.08f), new Vector2(0.49f, 0.32f), new Color(0.20f, 0.27f, 0.38f), () => SetScreen(VrUiScreen.Settings), 22);
-            CreateButton(p, "BtnDiagnostics", "DIAGNOSTICO COMPLETO\n<size=15>(FPS, Latencia, Coordenadas, Erros)</size>", new Vector2(0.51f, 0.08f), new Vector2(0.96f, 0.32f), new Color(0.32f, 0.24f, 0.14f), () => SetScreen(VrUiScreen.Diagnostics), 22);
+            CreateButton(p, "BtnStartLive", "INICIAR LIVE TRACKING\n<size=15>(Depth 3D + Motor IK + Kalman)</size>", new Vector2(0.04f, 0.36f), new Vector2(0.49f, 0.60f), new Color(0.09f, 0.48f, 0.34f), () => SetScreen(VrUiScreen.LiveTracking), 22);
+            CreateButton(p, "BtnCalibration", "CALIBRACAO GUIADA & MANUAL\n<size=15>(Altura, Pernas + Fundo Depth)</size>", new Vector2(0.51f, 0.36f), new Vector2(0.96f, 0.60f), new Color(0.14f, 0.34f, 0.56f), () => SetScreen(VrUiScreen.Calibration), 22);
+            CreateButton(p, "BtnSettings", "CONFIGURACOES & OFFSETS\n<size=15>(Depth 3D, Foot Lock, Offsets)</size>", new Vector2(0.04f, 0.08f), new Vector2(0.49f, 0.32f), new Color(0.20f, 0.27f, 0.38f), () => SetScreen(VrUiScreen.Settings), 22);
+            CreateButton(p, "BtnDiagnostics", "DIAGNOSTICO COMPLETO\n<size=15>(FPS, Depth 3D, Coordenadas, Erros)</size>", new Vector2(0.51f, 0.08f), new Vector2(0.96f, 0.32f), new Color(0.32f, 0.24f, 0.14f), () => SetScreen(VrUiScreen.Diagnostics), 22);
 
-            CreateText(p, "MenuHint", "<color=#9FB6C8>Aponte com o controle e aperte o Gatilho (Trigger) para clicar  |  [Menu Esq] Alternar Menu/Live  |  [B] Espelho  |  [Y] Motor A/B</color>", 14, TextAnchor.MiddleCenter, new Vector2(0.02f, 0.0f), new Vector2(0.98f, 0.07f), Vector2.zero, Vector2.zero);
+            CreateText(p, "MenuHint", "<color=#9FB6C8>Gatilho: Clicar  |  [Menu Esq] Menu/Live  |  [Anal. Esq] Capturar Fundo Depth  |  [B] Espelho  |  [Y] Motor A/B</color>", 13, TextAnchor.MiddleCenter, new Vector2(0.02f, 0.0f), new Vector2(0.98f, 0.07f), Vector2.zero, Vector2.zero);
         }
 
         private void BuildCalibrationPanel()
@@ -271,10 +278,16 @@ namespace VirtualFootTracking.Visualization
             fillRt.offsetMin = Vector2.zero;
             fillRt.offsetMax = Vector2.zero;
 
-            CreateButton(p, "BtnAutoCalib", "AUTO-CALIBRAR (2.5s)\n<size=14>Fique em pe ereto</size>", new Vector2(0.66f, 0.72f), new Vector2(0.98f, 0.97f), new Color(0.09f, 0.48f, 0.34f), () =>
+            CreateButton(p, "BtnAutoCalib", "AUTO-CALIBRAR (2.5s)\n<size=13>Postura + Fundo Depth</size>", new Vector2(0.66f, 0.81f), new Vector2(0.98f, 0.98f), new Color(0.09f, 0.48f, 0.34f), () =>
             {
                 _calibration?.StartGuidedStandingCapture();
-            }, 19);
+                _depthDetector?.StartBackgroundCapture(1.5f);
+            }, 18);
+
+            CreateButton(p, "BtnCalibCaptureDepth", "CAPTURAR FUNDO DEPTH (1.5s)", new Vector2(0.66f, 0.70f), new Vector2(0.98f, 0.80f), new Color(0.45f, 0.36f, 0.10f), () =>
+            {
+                _depthDetector?.StartBackgroundCapture(1.5f);
+            }, 15);
 
             _calibValuesText = CreateText(p, "CalibVals", "", 18, TextAnchor.UpperLeft, new Vector2(0.02f, 0.14f), new Vector2(0.55f, 0.70f), new Vector2(10f, 8f), new Vector2(-8f, -8f));
 
@@ -301,31 +314,47 @@ namespace VirtualFootTracking.Visualization
             RectTransform p = CreateBodyArea("LiveTrackingPanel");
             _livePanel = p.gameObject;
 
-            _liveEngineBtnText = CreateButton(p, "BtnEngineAB", "MOTOR: PROPRIO IK", new Vector2(0.02f, 0.56f), new Vector2(0.30f, 0.94f), new Color(0.12f, 0.46f, 0.36f), () =>
+            _liveEngineBtnText = CreateButton(p, "BtnEngineAB", "MOTOR: PROPRIO IK", new Vector2(0.02f, 0.75f), new Vector2(0.28f, 0.97f), new Color(0.12f, 0.46f, 0.36f), () =>
             {
                 if (_getEngineMode == null || _setEngineMode == null) return;
                 TrackingEngineMode next = _getEngineMode() == TrackingEngineMode.ProprietaryEngine
                     ? TrackingEngineMode.RawSdkDiagnostic
                     : TrackingEngineMode.ProprietaryEngine;
                 _setEngineMode(next);
-            }, 16);
+            }, 15);
 
-            _liveMirrorBtnText = CreateButton(p, "BtnMirror", "ESPELHO: ON", new Vector2(0.31f, 0.56f), new Vector2(0.52f, 0.94f), new Color(0.14f, 0.30f, 0.46f), () =>
+            _liveMirrorBtnText = CreateButton(p, "BtnMirror", "ESPELHO: ON", new Vector2(0.29f, 0.75f), new Vector2(0.49f, 0.97f), new Color(0.14f, 0.30f, 0.46f), () =>
             {
                 if (_visualizer != null) _visualizer.IsMirrorViewEnabled = !_visualizer.IsMirrorViewEnabled;
-            }, 16);
+            }, 15);
 
-            _liveLockBtnText = CreateButton(p, "BtnLock", "TRAVA CHAO: ON", new Vector2(0.53f, 0.56f), new Vector2(0.76f, 0.94f), new Color(0.14f, 0.30f, 0.46f), () =>
+            _liveLockBtnText = CreateButton(p, "BtnLock", "TRAVA CHAO: ON", new Vector2(0.50f, 0.75f), new Vector2(0.74f, 0.97f), new Color(0.14f, 0.30f, 0.46f), () =>
             {
                 if (_proprietarySolver != null) _proprietarySolver.EnableFootLocking = !_proprietarySolver.EnableFootLocking;
-            }, 16);
+            }, 15);
 
-            _liveKalmanBtnText = CreateButton(p, "BtnKalman", "KALMAN: ON", new Vector2(0.77f, 0.56f), new Vector2(0.98f, 0.94f), new Color(0.14f, 0.30f, 0.46f), () =>
+            _liveKalmanBtnText = CreateButton(p, "BtnKalman", "KALMAN: ON", new Vector2(0.75f, 0.75f), new Vector2(0.98f, 0.97f), new Color(0.14f, 0.30f, 0.46f), () =>
             {
                 if (_kalman != null) _kalman.Enabled = !_kalman.Enabled;
-            }, 16);
+            }, 15);
 
-            _liveTrackersSummaryText = CreateText(p, "LiveSummary", "", 16, TextAnchor.MiddleLeft, new Vector2(0.02f, 0.04f), new Vector2(0.98f, 0.52f), new Vector2(8f, 0f), new Vector2(-8f, 0f));
+            _liveDepthBtnText = CreateButton(p, "BtnLiveDepth", "DEPTH LEG: ON", new Vector2(0.02f, 0.50f), new Vector2(0.34f, 0.72f), new Color(0.42f, 0.34f, 0.10f), () =>
+            {
+                if (_proprietarySolver != null) _proprietarySolver.EnableDepthLegFusion = !_proprietarySolver.EnableDepthLegFusion;
+            }, 15);
+
+            _liveCloudBtnText = CreateButton(p, "BtnLiveCloud", "NUVEM 3D: ON", new Vector2(0.35f, 0.50f), new Vector2(0.66f, 0.72f), new Color(0.16f, 0.30f, 0.44f), () =>
+            {
+                if (_visualizer != null) _visualizer.IsDepthPointsVisible = !_visualizer.IsDepthPointsVisible;
+            }, 15);
+
+            _liveBgBtnText = CreateButton(p, "BtnLiveBgCap", "CAPTURAR FUNDO (1.5s)", new Vector2(0.67f, 0.50f), new Vector2(0.98f, 0.72f), new Color(0.24f, 0.36f, 0.16f), () =>
+            {
+                _depthDetector?.StartBackgroundCapture(1.5f);
+            }, 15);
+
+            _liveTrackersSummaryText = CreateText(p, "LiveSummary", "", 15, TextAnchor.MiddleLeft, new Vector2(0.02f, 0.02f), new Vector2(0.98f, 0.48f), new Vector2(8f, 0f), new Vector2(-8f, 0f));
+            _liveTrackersSummaryText.lineSpacing = 1.06f;
         }
 
         private void BuildDiagnosticsPanel()
@@ -333,7 +362,7 @@ namespace VirtualFootTracking.Visualization
             RectTransform p = CreateBodyArea("DiagnosticsPanel");
             _diagnosticsPanel = p.gameObject;
 
-            _diagTelemetryText = CreateText(p, "DiagText", "", 18, TextAnchor.UpperLeft, new Vector2(0.02f, 0.13f), new Vector2(0.98f, 0.98f), new Vector2(10f, 6f), new Vector2(-10f, -6f));
+            _diagTelemetryText = CreateText(p, "DiagText", "", 17, TextAnchor.UpperLeft, new Vector2(0.02f, 0.13f), new Vector2(0.98f, 0.98f), new Vector2(10f, 6f), new Vector2(-10f, -6f));
 
             CreateButton(p, "BtnReloadMruk", "RECARREGAR SALA MRUK", new Vector2(0.02f, 0.02f), new Vector2(0.36f, 0.11f), new Color(0.14f, 0.34f, 0.54f), () => _onReloadMruk?.Invoke(), 16);
             CreateButton(p, "BtnDiagSwap", "ALTERNAR MOTOR (A/B)", new Vector2(0.38f, 0.02f), new Vector2(0.68f, 0.11f), new Color(0.28f, 0.34f, 0.16f), () =>
@@ -351,35 +380,43 @@ namespace VirtualFootTracking.Visualization
             RectTransform p = CreateBodyArea("SettingsPanel");
             _settingsPanel = p.gameObject;
 
-            _settingsTogglesText = CreateText(p, "SetTogglesTxt", "", 18, TextAnchor.UpperLeft, new Vector2(0.02f, 0.54f), new Vector2(0.50f, 0.96f), new Vector2(10f, 6f), new Vector2(-8f, -6f));
+            _settingsTogglesText = CreateText(p, "SetTogglesTxt", "", 17, TextAnchor.UpperLeft, new Vector2(0.02f, 0.45f), new Vector2(0.50f, 0.97f), new Vector2(10f, 4f), new Vector2(-8f, -4f));
 
-            CreateButton(p, "TogFloorClamp", "Alternar Floor Clamp", new Vector2(0.52f, 0.87f), new Vector2(0.98f, 0.95f), new Color(0.14f, 0.32f, 0.48f), () =>
+            CreateButton(p, "TogFloorClamp", "Alternar Floor Clamp", new Vector2(0.52f, 0.90f), new Vector2(0.98f, 0.968f), new Color(0.14f, 0.32f, 0.48f), () =>
             {
                 if (_proprietarySolver != null) _proprietarySolver.EnableFloorClamp = !_proprietarySolver.EnableFloorClamp;
-            }, 16);
-            CreateButton(p, "TogFootLock", "Alternar Foot Locking", new Vector2(0.52f, 0.77f), new Vector2(0.98f, 0.85f), new Color(0.14f, 0.32f, 0.48f), () =>
+            }, 15);
+            CreateButton(p, "TogFootLock", "Alternar Foot Locking", new Vector2(0.52f, 0.825f), new Vector2(0.98f, 0.893f), new Color(0.14f, 0.32f, 0.48f), () =>
             {
                 if (_proprietarySolver != null) _proprietarySolver.EnableFootLocking = !_proprietarySolver.EnableFootLocking;
-            }, 16);
-            CreateButton(p, "TogIk", "Alternar IK Anatomica", new Vector2(0.52f, 0.67f), new Vector2(0.98f, 0.75f), new Color(0.14f, 0.32f, 0.48f), () =>
+            }, 15);
+            CreateButton(p, "TogIk", "Alternar IK Anatomica", new Vector2(0.52f, 0.75f), new Vector2(0.98f, 0.818f), new Color(0.14f, 0.32f, 0.48f), () =>
             {
                 if (_proprietarySolver != null) _proprietarySolver.EnableAnatomicalIk = !_proprietarySolver.EnableAnatomicalIk;
-            }, 16);
-            CreateButton(p, "TogKalman", "Alternar Filtro Kalman", new Vector2(0.52f, 0.57f), new Vector2(0.98f, 0.65f), new Color(0.14f, 0.32f, 0.48f), () =>
+            }, 15);
+            CreateButton(p, "TogKalman", "Alternar Filtro Kalman", new Vector2(0.52f, 0.675f), new Vector2(0.98f, 0.743f), new Color(0.14f, 0.32f, 0.48f), () =>
             {
                 if (_kalman != null) _kalman.Enabled = !_kalman.Enabled;
-            }, 16);
-            CreateButton(p, "TogRawGhost", "Alternar Esqueleto SDK Bruto", new Vector2(0.52f, 0.47f), new Vector2(0.98f, 0.55f), new Color(0.14f, 0.32f, 0.48f), () =>
+            }, 15);
+            CreateButton(p, "TogRawGhost", "Alternar Esqueleto SDK Bruto", new Vector2(0.52f, 0.60f), new Vector2(0.98f, 0.668f), new Color(0.14f, 0.32f, 0.48f), () =>
             {
                 if (_visualizer != null) _visualizer.IsRawSkeletonVisible = !_visualizer.IsRawSkeletonVisible;
-            }, 16);
+            }, 15);
+            CreateButton(p, "TogDepthFusion", "Alternar Depth Leg Fusion", new Vector2(0.52f, 0.525f), new Vector2(0.98f, 0.593f), new Color(0.42f, 0.34f, 0.10f), () =>
+            {
+                if (_proprietarySolver != null) _proprietarySolver.EnableDepthLegFusion = !_proprietarySolver.EnableDepthLegFusion;
+            }, 15);
+            CreateButton(p, "TogDepthCloud", "Alternar Nuvem de Pontos 3D", new Vector2(0.52f, 0.45f), new Vector2(0.98f, 0.518f), new Color(0.18f, 0.34f, 0.42f), () =>
+            {
+                if (_visualizer != null) _visualizer.IsDepthPointsVisible = !_visualizer.IsDepthPointsVisible;
+            }, 15);
 
-            _settingsSelectedTrackerText = CreateText(p, "SelTrackerTxt", "", 18, TextAnchor.MiddleLeft, new Vector2(0.02f, 0.36f), new Vector2(0.45f, 0.45f), new Vector2(10f, 0f), Vector2.zero);
+            _settingsSelectedTrackerText = CreateText(p, "SelTrackerTxt", "", 18, TextAnchor.MiddleLeft, new Vector2(0.02f, 0.36f), new Vector2(0.45f, 0.44f), new Vector2(10f, 0f), Vector2.zero);
 
-            CreateButton(p, "SelLF", "L-FOOT", new Vector2(0.46f, 0.37f), new Vector2(0.58f, 0.44f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.LeftFoot, 14);
-            CreateButton(p, "SelRF", "R-FOOT", new Vector2(0.59f, 0.37f), new Vector2(0.71f, 0.44f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.RightFoot, 14);
-            CreateButton(p, "SelLK", "L-KNEE", new Vector2(0.72f, 0.37f), new Vector2(0.84f, 0.44f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.LeftKnee, 14);
-            CreateButton(p, "SelRK", "R-KNEE", new Vector2(0.85f, 0.37f), new Vector2(0.98f, 0.44f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.RightKnee, 14);
+            CreateButton(p, "SelLF", "L-FOOT", new Vector2(0.46f, 0.37f), new Vector2(0.58f, 0.435f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.LeftFoot, 14);
+            CreateButton(p, "SelRF", "R-FOOT", new Vector2(0.59f, 0.37f), new Vector2(0.71f, 0.435f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.RightFoot, 14);
+            CreateButton(p, "SelLK", "L-KNEE", new Vector2(0.72f, 0.37f), new Vector2(0.84f, 0.435f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.LeftKnee, 14);
+            CreateButton(p, "SelRK", "R-KNEE", new Vector2(0.85f, 0.37f), new Vector2(0.98f, 0.435f), new Color(0.18f, 0.28f, 0.38f), () => _selectedOffsetTracker = VirtualTrackerId.RightKnee, 14);
 
             _settingsOffsetValuesText = CreateText(p, "OffsetValsTxt", "", 18, TextAnchor.MiddleLeft, new Vector2(0.02f, 0.14f), new Vector2(0.52f, 0.34f), new Vector2(10f, 0f), Vector2.zero);
 
@@ -387,8 +424,9 @@ namespace VirtualFootTracking.Visualization
             AddStepperRow(p, "Offset Y:", 0.20f, () => _calibration?.AdjustTrackerPositionOffset(_selectedOffsetTracker, new Vector3(0f, -0.01f, 0f)), () => _calibration?.AdjustTrackerPositionOffset(_selectedOffsetTracker, new Vector3(0f, 0.01f, 0f)));
             AddStepperRow(p, "Offset Z:", 0.12f, () => _calibration?.AdjustTrackerPositionOffset(_selectedOffsetTracker, new Vector3(0f, 0f, -0.01f)), () => _calibration?.AdjustTrackerPositionOffset(_selectedOffsetTracker, new Vector3(0f, 0f, 0.01f)));
 
-            CreateButton(p, "BtnZeroAllOffsets", "ZERAR TODOS OFFSETS", new Vector2(0.02f, 0.02f), new Vector2(0.42f, 0.10f), new Color(0.40f, 0.18f, 0.16f), () => _calibration?.ResetTrackerOffsets(), 16);
-            CreateButton(p, "BtnSetBack", "VOLTAR AO MENU", new Vector2(0.68f, 0.02f), new Vector2(0.98f, 0.10f), new Color(0.20f, 0.24f, 0.32f), () => SetScreen(VrUiScreen.MainMenu), 16);
+            CreateButton(p, "BtnZeroAllOffsets", "ZERAR OFFSETS", new Vector2(0.02f, 0.02f), new Vector2(0.33f, 0.10f), new Color(0.40f, 0.18f, 0.16f), () => _calibration?.ResetTrackerOffsets(), 15);
+            CreateButton(p, "BtnClearDepthBg", "LIMPAR FUNDO DEPTH", new Vector2(0.35f, 0.02f), new Vector2(0.66f, 0.10f), new Color(0.40f, 0.30f, 0.12f), () => _depthDetector?.ClearBackgroundBaseline(), 15);
+            CreateButton(p, "BtnSetBack", "VOLTAR AO MENU", new Vector2(0.68f, 0.02f), new Vector2(0.98f, 0.10f), new Color(0.20f, 0.24f, 0.32f), () => SetScreen(VrUiScreen.MainMenu), 15);
         }
 
         private void RefreshMainMenu(in DiagnosticsSnapshot diag)
@@ -404,12 +442,15 @@ namespace VirtualFootTracking.Visualization
                 $"Confianca: {diag.BodyConfidence:F2}";
 
             string floorColor = diag.FloorSource == FloorDataSource.MrukSceneApi ? "#24D9FF" : "#FFB347";
+            string depthStateStr = diag.DepthSupported
+                ? (diag.DepthReady ? "<color=#FFE024>READY</color>" : "<color=#FFB347>WAIT</color>")
+                : "<color=#FF5555>OFF</color>";
             _mainSceneCardText.text =
-                $"<b><color=#5CE1E6>SCENE MAPPING</color></b>\n" +
-                $"Permissao: {(diag.ScenePermissionGranted ? "OK" : "NEGADA")}\n" +
-                $"Fonte: <color={floorColor}>{diag.FloorSource}</color>\n" +
-                $"Altura Chao: {diag.FloorWorldY:F3} m\n" +
-                $"Ancoras Chao: {diag.FloorAnchorCount}\n" +
+                $"<b><color=#5CE1E6>SCENE &amp; DEPTH 3D</color></b>\n" +
+                $"USE_SCENE: {(diag.ScenePermissionGranted ? "OK" : "NEGADA")}\n" +
+                $"Chao: <color={floorColor}>{diag.FloorSource}</color> ({diag.FloorWorldY:F2}m)\n" +
+                $"Depth 3D: {depthStateStr} | Pts={diag.DepthForegroundPointCount}\n" +
+                $"Fundo Voxels: {diag.DepthBaselineVoxelCount}\n" +
                 $"FPS / Hz: {diag.Fps:F0} / {diag.TrackingUpdateHz:F0}";
 
             int validCount = 0;
@@ -461,9 +502,17 @@ namespace VirtualFootTracking.Visualization
             _liveMirrorBtnText.text = (_visualizer != null && _visualizer.IsMirrorViewEnabled) ? "ESPELHO: ON" : "ESPELHO: OFF";
             _liveLockBtnText.text = (_proprietarySolver != null && _proprietarySolver.EnableFootLocking) ? "TRAVA CHAO: ON" : "TRAVA CHAO: OFF";
             _liveKalmanBtnText.text = (_kalman != null && _kalman.Enabled) ? "KALMAN: ON" : "KALMAN: OFF";
+            _liveDepthBtnText.text = (_proprietarySolver != null && _proprietarySolver.EnableDepthLegFusion) ? "DEPTH LEG: ON" : "DEPTH LEG: OFF";
+            _liveCloudBtnText.text = (_visualizer != null && _visualizer.IsDepthPointsVisible) ? "NUVEM 3D: ON" : "NUVEM 3D: OFF";
+            _liveBgBtnText.text = diag.DepthCapturingBackground ? "CAPTURANDO FUNDO..." : $"CAPTURAR FUNDO ({diag.DepthBaselineVoxelCount})";
+
+            string dStat = diag.DepthCapturingBackground
+                ? "<color=#FFE024>CAPTURANDO</color>"
+                : (diag.DepthReady ? "<color=#FFE024>READY</color>" : (diag.DepthSupported ? "<color=#FFB347>INIT</color>" : "<color=#FF5555>UNSUP</color>"));
 
             _sb.Clear();
-            _sb.AppendLine($"FPS: <b>{diag.Fps:F0}</b> | Hz: <b>{diag.TrackingUpdateHz:F0}</b> | Latencia: <b>{diag.SolverLatencyMs:F2}ms</b> | Chao: {diag.FloorSource} ({diag.FloorWorldY:F2}m)");
+            _sb.AppendLine($"FPS: <b>{diag.Fps:F0}</b> | Hz: <b>{diag.TrackingUpdateHz:F0}</b> | Lat: <b>{diag.SolverLatencyMs:F2}ms</b> | Chao: {diag.FloorSource} ({diag.FloorWorldY:F2}m)");
+            _sb.AppendLine($"Depth 3D: {dStat} | FgPts=<b>{diag.DepthForegroundPointCount}</b> (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Raw={diag.DepthRawHitCount} | Fundo={diag.DepthBaselineVoxelCount} vox");
             AppendLiveRow("LF", diag.CurrentFrame.LeftFoot, "RF", diag.CurrentFrame.RightFoot);
             AppendLiveRow("LK", diag.CurrentFrame.LeftKnee, "RK", diag.CurrentFrame.RightKnee);
             _liveTrackersSummaryText.text = _sb.ToString();
@@ -483,6 +532,7 @@ namespace VirtualFootTracking.Visualization
             _sb.AppendLine($"Perms -> BODY_TRACKING: {(diag.BodyPermissionGranted ? "<color=#49E870>OK</color>" : "<color=#FF5555>NEGADA</color>")} | USE_SCENE: {(diag.ScenePermissionGranted ? "<color=#49E870>OK</color>" : "<color=#FF5555>NEGADA</color>")}");
             _sb.AppendLine($"Body -> {(diag.BodyTrackingActive ? "ATIVO" : "INATIVO")} | {diag.BodyFidelity} | Calib={diag.BodyCalibration} | Conf={diag.BodyConfidence:F2} | Perdas={diag.TrackingLossEventsCount}");
             _sb.AppendLine($"Floor -> {diag.FloorSource} | Y={diag.FloorWorldY:F3}m | Ancoras={diag.FloorAnchorCount} | {diag.StatusMessage}");
+            _sb.AppendLine($"Depth -> Sup={diag.DepthSupported} Ready={diag.DepthReady} Fusion={diag.DepthFusionEnabled} | Raw={diag.DepthRawHitCount} Fg={diag.DepthForegroundPointCount} (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Fundo={diag.DepthBaselineVoxelCount} vox | {diag.DepthStatusMessage}");
             _sb.AppendLine("----------------------------------------------------------------------------------------");
             _sb.AppendLine("<b>ID      POSICAO (X, Y, Z)       VEL(m/s)   CHAO dY   FLAGS           FONTE     ESTADO</b>");
             AppendDiagRow("L-FOOT", diag.CurrentFrame.LeftFoot);
@@ -490,7 +540,7 @@ namespace VirtualFootTracking.Visualization
             AppendDiagRow("L-KNEE", diag.CurrentFrame.LeftKnee);
             AppendDiagRow("R-KNEE", diag.CurrentFrame.RightKnee);
             _sb.AppendLine("----------------------------------------------------------------------------------------");
-            _sb.AppendLine("Cores: <color=#49E870>VERDE=SDK_OBS</color>  <color=#24D9FF>CIANO=SDK_GEN</color>  <color=#FF991A>LARANJA=ENG_IK</color>  <color=#EB4DFF>MAGENTA=ENG_PRED</color>  <color=#FF5555>VERMELHO=LOST</color>");
+            _sb.AppendLine("Cores: <color=#49E870>VERDE=SDK_OBS</color>  <color=#FFE024>AMARELO=DEPTH_3D</color>  <color=#24D9FF>CIANO=SDK_GEN</color>  <color=#FF991A>LARANJA=ENG_IK</color>  <color=#EB4DFF>MAGENTA=ENG_PRED</color>  <color=#FF5555>VERMELHO=LOST</color>");
             if (diag.RecentErrors != null && diag.RecentErrors.Length > 0)
             {
                 _sb.AppendLine($"<color=#FF7777>Ultimo erro: {diag.RecentErrors[diag.RecentErrors.Length - 1]}</color>");
@@ -512,6 +562,9 @@ namespace VirtualFootTracking.Visualization
             bool ik = _proprietarySolver != null && _proprietarySolver.EnableAnatomicalIk;
             bool km = _kalman != null && _kalman.Enabled;
             bool raw = _visualizer != null && _visualizer.IsRawSkeletonVisible;
+            bool df = _proprietarySolver != null && _proprietarySolver.EnableDepthLegFusion;
+            bool dc = _visualizer != null && _visualizer.IsDepthPointsVisible;
+            int vox = _depthDetector != null ? _depthDetector.StaticBackgroundVoxelCount : 0;
 
             _settingsTogglesText.text =
                 $"<b><color=#5CE1E6>PARAMETROS DO ENGINE</color></b>\n\n" +
@@ -519,7 +572,9 @@ namespace VirtualFootTracking.Visualization
                 $"Foot Locking (Trava Piso):     <b>{(fl ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>\n" +
                 $"IK Anatomica (2-Bone):         <b>{(ik ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>\n" +
                 $"Filtro Kalman Adaptativo:      <b>{(km ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>\n" +
-                $"Exibir Esqueleto SDK Bruto:    <b>{(raw ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>";
+                $"Exibir Esqueleto SDK Bruto:    <b>{(raw ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>\n" +
+                $"Depth Leg Fusion (3D):         <b>{(df ? "<color=#FFE024>ON</color>" : "<color=#FF5555>OFF</color>")}</b>\n" +
+                $"Nuvem Pontos Depth (Fundo={vox}): <b>{(dc ? "<color=#49E870>ON</color>" : "<color=#FF5555>OFF</color>")}</b>";
 
             _settingsSelectedTrackerText.text = $"<b>Tracker Offset ({_selectedOffsetTracker}):</b>";
 

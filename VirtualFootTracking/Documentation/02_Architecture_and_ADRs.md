@@ -8,12 +8,14 @@ A arquitetura separa completamente os contratos biomecânicos e de tracking (`Vi
 flowchart LR
     OVR["Meta OVRBody / OpenXR\n(FullBody + IOBT High)"] --> BTP["MetaOvrBodyTrackingProvider\n(IBodyTrackingProvider)"]
     MRUK["Meta MRUK / Scene API\n(FloorAnchors + Raycast)"] --> SMP["MrukSpatialMappingProvider\n(ISpatialMappingProvider)"]
+    DEPTH["Meta Depth API\n(EnvironmentRaycastManager)"] --> DLD["EnvironmentDepthLegDetector\n(5-Layer Foreground + Voxel Bg)"]
 
     BTP --> RT["VirtualFootTrackingRuntime"]
     SMP --> RT
+    DLD --> RT
     CAL["GuidedCalibrationProvider\n(ICalibrationProvider)"] --> RT
 
-    RT --> SOLV["ProprietaryFootTrackingSolver + AnalyticLegIkSolver\n(ou DiagnosticPassthroughFootSolver A/B)"]
+    RT --> SOLV["ProprietaryFootTrackingSolver + AnalyticLegIkSolver\n(Depth 3D + SDK + Stance Lock)"]
     SOLV --> PRED["AdaptiveKalmanMotionPredictor\n(ou NullMotionPredictor)"]
 
     PRED --> OUT["DiagnosticLogTrackerOutput\n(ITrackerOutput)"]
@@ -45,7 +47,7 @@ Cada um dos quatro trackers (`LeftFoot`, `RightFoot`, `LeftKnee`, `RightKnee`) �
 - `LinearVelocity` (`Vector3`) e `AngularVelocity` (`Vector3`)
 - `TimestampSeconds` (`double`, monotonic `realtimeSinceStartupAsDouble`)
 - `Validity`: `Invalid`, `Valid`, `Degraded`, `TemporarilyLost`
-- `Source`: `Unavailable`, `SdkObserved`, `SdkEstimatedGenerativeLegs`, `EngineBiomechanicalFallback`, `EngineMotionPredicted`
+- `Source`: `Unavailable`, `SdkObserved`, `SdkEstimatedGenerativeLegs`, `EngineBiomechanicalFallback`, `EngineMotionPredicted`, `DepthObserved` (`DEPTH_3D`)
 - `Confidence`: `0.0f` a `1.0f`
 - `Space`: `UnityWorldSpace`, `TrackingRigLocalSpace` ou `HeadsetLocalSpace`
 - `HeightAboveFloorMeters` (`float`), `IsGrounded` (`bool`), `FloorClamped` (`bool`)
@@ -79,4 +81,15 @@ Para nunca misturar espaços de coordenadas sem transformação explícita:
 - O usuário pode alternar em tempo real entre o Motor Próprio e o `DiagnosticPassthroughFootSolver` (botão `Y` ou UI Live Tracking) para comparação A/B direta no headset.
 
 ### ADR-004 — Blueprint de Comunicação PC / SteamVR (`TrackerPacketSchema.cs`)
-- O schema `TrackerPacketFrame` (`Magic = "VFT1"`, versão `1`, `SequenceNumber`, `MonotonicTimestampNs`, `FloorHeightWorldY` e `4 × TrackerWireEntry`) já prepara o payload que será transmitido via UDP Wi-Fi (ou USB ADB forward) para o futuro driver C++ `openvr` (`vr::ITrackedDeviceServerDriver` registrado como `vr::TrackedDeviceClass_GenericTracker`) na Fase 3.
+- O schema `TrackerPacketFrame` (`Magic = "VFT1"`, versão `1`, `SequenceNumber`, `MonotonicTimestampNs`, `FloorHeightWorldY` e `4 × TrackerWireEntry`) já prepara o payload que será transmitido via UDP Wi-Fi (ou USB ADB forward) para o futuro driver C++ `openvr` (`vr::ITrackedDeviceServerDriver` registrado como `vr::TrackedDeviceClass_GenericTracker`) na Fase 4.
+
+### ADR-009 — Detecção Física de Pernas e Chutes via Depth API em Tempo Real (`v0.3.0`)
+- Testes em hardware real mostraram que o `Generative Legs` da Meta (`v0.2.0`) estima bem passos e apoio no piso (~90% segundo o usuário), mas **não detecta chutes isolados no ar nem elevação estacionária de joelho**, pois não há câmeras dedicadas aos pés e o modelo reage apenas ao movimento do tronco/cabeça.
+- Embora o Scene Mapping estático (Space Setup / âncoras de móveis) seja atualizado apenas por escaneamento manual e não sirva para membros dinâmicos, a **Depth API em tempo real** (`Meta.XR.EnvironmentRaycastManager` sobre OpenXR no Quest 3S) atualiza o mapa de profundidade a cada frame dentro do cone frontal das câmeras (`~±36°` H × `-46°..+6°` V na nossa grade `11×8`, até `2,3 m`).
+- `EnvironmentDepthLegDetector` isola apenas a perna em movimento aplicando 5 camadas de filtragem por frame:
+  1. **Piso:** descarta pontos com `y <= floorY + 0,10 m`.
+  2. **Tronco Superior:** descarta pontos acima de `pelvisY + 0,14 m`.
+  3. **Envelope Anatômico:** limita distância à pelve (`0,20 m` até `coxa + canela + 0,24 m`).
+  4. **Braços/Mãos/Controles:** exclui esferas/cápsulas ao redor de `leftHandAnchor/rightHandAnchor`, palmas, punhos e antebraços do `OVRBody`.
+  5. **Ambiente Estático:** exclui voxels dentro de volumes `MRUKRoom` (paredes/móveis) e um mapa opcional de **Captura de Fundo Depth** por voxels (`0,11 m`) capturado fora do cilindro corporal (`r > 0,36 m`).
+- Quando um cluster válido (`>= 4` pontos) indica pé elevado (`> floorY + tornozelo + 9,5 cm`), passo/chute (`distância horizontal do quadril > 22 cm`) ou joelho erguido (`IsKneeDominant`), `ProprietaryFootTrackingSolver` destrava o pé do piso imediatamente, guia a IK 2-bone e classifica explicitamente os trackers com `TrackingDataSource.DepthObserved` (`DEPTH_3D`, cor **Amarela**). Outside frustum, retorna suavemente para `SdkEstimatedGenerativeLegs` + trava de piso.

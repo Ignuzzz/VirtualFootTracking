@@ -110,6 +110,20 @@ namespace VirtualFootTracking.Diagnostics
             _latestSnapshot.ActiveSolverName = solverName ?? string.Empty;
         }
 
+        public void SetDepthTelemetry(in DepthObservationFrame depth, bool depthFusionEnabled)
+        {
+            _latestSnapshot.DepthSupported = depth.IsSupported;
+            _latestSnapshot.DepthReady = depth.IsReady;
+            _latestSnapshot.DepthFusionEnabled = depthFusionEnabled;
+            _latestSnapshot.DepthCapturingBackground = depth.IsCapturingBackground;
+            _latestSnapshot.DepthBaselineVoxelCount = depth.StaticBackgroundVoxelCount;
+            _latestSnapshot.DepthRawHitCount = depth.RawHitCount;
+            _latestSnapshot.DepthForegroundPointCount = depth.ForegroundPointCount;
+            _latestSnapshot.DepthLeftHits = depth.LeftLeg.PointCount;
+            _latestSnapshot.DepthRightHits = depth.RightLeg.PointCount;
+            _latestSnapshot.DepthStatusMessage = depth.StatusMessage ?? string.Empty;
+        }
+
         public void RecordError(string message)
         {
             if (string.IsNullOrWhiteSpace(message))

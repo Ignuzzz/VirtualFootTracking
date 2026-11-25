@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d236b7d11115f2143951f1e14045df39, type: 3}
   m_Name: AndroidXRGeneralSettings
   m_EditorClassIdentifier: 
-  m_Manager: {fileID: 3491058545649333881}
+  m_Manager: {fileID: 6583557043561843242}
   m_InitManagerOnStart: 1
---- !u!114 &3491058545649333881
+--- !u!114 &6583557043561843242
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

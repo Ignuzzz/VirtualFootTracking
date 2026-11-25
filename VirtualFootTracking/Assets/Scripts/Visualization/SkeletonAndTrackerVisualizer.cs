@@ -13,6 +13,7 @@ namespace VirtualFootTracking.Visualization
     public class SkeletonAndTrackerVisualizer : MonoBehaviour
     {
         private const int MaxFullBodyJoints = 84;
+        private const int MaxDepthPoints = 96;
         private const int HipsJointIndex = 1;
         private const int LeftUpperLegIndex = 70;
         private const int RightUpperLegIndex = 77;
@@ -35,6 +36,7 @@ namespace VirtualFootTracking.Visualization
         [Header("Display Options")]
         [SerializeField] private bool _showRawSdkSkeleton = true;
         [SerializeField] private bool _showMirrorRig = true;
+        [SerializeField] private bool _showDepthPointCloud = true;
         [SerializeField] private float _mirrorForwardDistanceMeters = 1.35f;
 
         private Transform _worldRoot;
@@ -53,6 +55,11 @@ namespace VirtualFootTracking.Visualization
 
         private SolvedLegRig _worldSolvedLegs;
         private SolvedLegRig _mirrorSolvedLegs;
+
+        private GameObject[] _worldDepthSpheres;
+        private Material[] _worldDepthMaterials;
+        private GameObject[] _mirrorDepthSpheres;
+        private Material[] _mirrorDepthMaterials;
 
         private LineRenderer _floorOutline;
         private GameObject _floorQuad;
@@ -106,6 +113,20 @@ namespace VirtualFootTracking.Visualization
             }
         }
 
+        public bool IsDepthPointsVisible
+        {
+            get => _showDepthPointCloud;
+            set
+            {
+                _showDepthPointCloud = value;
+                if (!value)
+                {
+                    HideDepthPool(_worldDepthSpheres);
+                    HideDepthPool(_mirrorDepthSpheres);
+                }
+            }
+        }
+
         public void Initialize()
         {
             _unlitColorShader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
@@ -120,6 +141,9 @@ namespace VirtualFootTracking.Visualization
 
             BuildSkeletonPool(_worldRoot, "World", out _worldJointSpheres, out _worldJointMaterials, out _worldBoneLines);
             BuildSkeletonPool(_mirrorRoot, "Mirror", out _mirrorJointSpheres, out _mirrorJointMaterials, out _mirrorBoneLines);
+
+            BuildDepthPool(_worldRoot, "WorldDepth", out _worldDepthSpheres, out _worldDepthMaterials);
+            BuildDepthPool(_mirrorRoot, "MirrorDepth", out _mirrorDepthSpheres, out _mirrorDepthMaterials);
 
             for (int i = 0; i < 4; i++)
             {
@@ -187,6 +211,97 @@ namespace VirtualFootTracking.Visualization
 
             UpdateSolvedLegRig(_worldSolvedLegs, skeleton, frame, floor.WorldHeightY, Vector3.zero, true);
             UpdateSolvedLegRig(_mirrorSolvedLegs, skeleton, frame, floor.WorldHeightY, _mirrorOffsetWorld, _showMirrorRig);
+        }
+
+        public void UpdateDepthVisuals(in DepthObservationFrame depthFrame)
+        {
+            if (_worldDepthSpheres == null || _mirrorDepthSpheres == null)
+                return;
+
+            if (!_showDepthPointCloud || !depthFrame.IsReady || depthFrame.ForegroundPoints == null || depthFrame.ForegroundPointCount <= 0)
+            {
+                HideDepthPool(_worldDepthSpheres);
+                HideDepthPool(_mirrorDepthSpheres);
+                return;
+            }
+
+            int count = Mathf.Min(depthFrame.ForegroundPointCount, MaxDepthPoints);
+            Color leftColor = new Color(1.00f, 0.88f, 0.14f);  // Bright Yellow
+            Color rightColor = new Color(0.78f, 1.00f, 0.18f); // Lime-Yellow
+            Color neutralColor = new Color(1.00f, 0.65f, 0.18f); // Warm Amber
+
+            for (int i = 0; i < MaxDepthPoints; i++)
+            {
+                if (i < count)
+                {
+                    DepthForegroundPoint pt = depthFrame.ForegroundPoints[i];
+                    Color c = pt.AssignedSide < 0 ? leftColor : (pt.AssignedSide > 0 ? rightColor : neutralColor);
+
+                    _worldDepthSpheres[i].SetActive(true);
+                    _worldDepthSpheres[i].transform.position = pt.WorldPosition;
+                    _worldDepthMaterials[i].color = c;
+
+                    if (_showMirrorRig)
+                    {
+                        _mirrorDepthSpheres[i].SetActive(true);
+                        _mirrorDepthSpheres[i].transform.position = pt.WorldPosition + _mirrorOffsetWorld;
+                        _mirrorDepthMaterials[i].color = c;
+                    }
+                    else
+                    {
+                        _mirrorDepthSpheres[i].SetActive(false);
+                    }
+                }
+                else
+                {
+                    _worldDepthSpheres[i].SetActive(false);
+                    _mirrorDepthSpheres[i].SetActive(false);
+                }
+            }
+        }
+
+        private void BuildDepthPool(
+            Transform parent,
+            string prefix,
+            out GameObject[] spheres,
+            out Material[] materials)
+        {
+            spheres = new GameObject[MaxDepthPoints];
+            materials = new Material[MaxDepthPoints];
+
+            for (int i = 0; i < MaxDepthPoints; i++)
+            {
+                GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                sphere.name = $"{prefix}_{i}";
+                sphere.transform.SetParent(parent, false);
+                sphere.transform.localScale = Vector3.one * 0.022f;
+                DestroyCollider(sphere);
+
+                Material mat = CreateMaterial(new Color(1.00f, 0.88f, 0.14f));
+                Renderer rend = sphere.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.sharedMaterial = mat;
+                }
+
+                sphere.SetActive(false);
+                spheres[i] = sphere;
+                materials[i] = mat;
+            }
+        }
+
+        private static void HideDepthPool(GameObject[] spheres)
+        {
+            if (spheres == null)
+                return;
+
+            for (int i = 0; i < spheres.Length; i++)
+            {
+                if (spheres[i] != null && spheres[i].activeSelf)
+                {
+                    spheres[i].SetActive(false);
+                }
+            }
         }
 
         private void BuildSkeletonPool(
@@ -615,6 +730,8 @@ namespace VirtualFootTracking.Visualization
                     return new Color(1.00f, 0.60f, 0.10f); // Orange
                 case TrackingDataSource.EngineMotionPredicted:
                     return new Color(0.92f, 0.30f, 1.00f); // Magenta
+                case TrackingDataSource.DepthObserved:
+                    return new Color(1.00f, 0.88f, 0.14f); // Bright Gold-Yellow
                 default:
                     return new Color(1f, 0.23f, 0.23f);    // Red
             }

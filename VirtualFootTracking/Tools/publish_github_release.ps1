@@ -2,15 +2,15 @@
     [string]$RepoName = "VirtualFootTracking",
     [ValidateSet("public", "private")]
     [string]$Visibility = "public",
-    [string]$Tag = "v0.2.0-engine",
-    [string]$Title = "Virtual Foot Tracking v0.2.0 — Foot Tracking Engine + Calibration + VR UI (Quest 3S)"
+    [string]$Tag = "v0.3.0-depth",
+    [string]$Title = "Virtual Foot Tracking v0.3.0 — Real-Time Depth API Kick & Knee Detection (Quest 3S)"
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $ProjectDir "..")).Path
-$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.2_Engine.apk"
+$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.3_Depth.apk"
 
 if (-not (Test-Path $ApkPath)) {
     Write-Error "APK not found at $ApkPath. Run .\Tools\build_apk.ps1 first."
@@ -63,17 +63,17 @@ $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = "Stop"
 
 $notes = @"
-Meta Quest 3S Phase 2 — Proprietary Foot Tracking Engine (`v0.2.0`):
-- **Foot Tracking Engine Próprio (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`):**
-  - Cinemática inversa analítica 2-bone (`Quadril -> Joelho -> Tornozelo`) com limites anatômicos (`2°–148°`) e prevenção de hiperextensão/inversão do joelho em agachamentos, sentar e chutes.
-  - Detecção de contato com o piso MRUK (`Stance` vs `Swing`), **Foot Locking** elástico anti-deslizamento e bloqueio de penetração no chão.
-  - Fallback biomecânico (`EngineBiomechanicalFallback`) quando dados inferiores do SDK estiverem ausentes.
-- **Filtro de Kalman Adaptativo (`AdaptiveKalmanMotionPredictor`):**
-  - Baixo jitter quando apoiado, alta responsividade em chutes/movimentos rápidos de combate e predição amortecida (até `0,35s`) em perda temporária (`EngineMotionPredicted`).
-- **Calibração Guiada & Manual (`GuidedCalibrationProvider`):**
-  - Captura automática de postura em pé (`2,5s`) + ajustes manuais de altura, coxa, canela, quadril, distância dos pés, largura da base, yaw inicial e offsets individuais.
-- **Interface VR Interativa (5 painéis) + Laser Pointer nos controles Touch Plus:**
-  - Menu Principal, Calibração, Live Tracking (com alternância A/B ao vivo entre Motor Próprio e SDK Bruto), Configurações/Offsets e Diagnóstico Completo.
+Meta Quest 3S Phase 3 — Real-Time Depth API Leg & Kick Detection (`v0.3.0`):
+- **Detecção Física em Tempo Real via Depth API (`EnvironmentDepthLegDetector`):**
+  - Usa o `EnvironmentRaycastManager` (Meta XR MRUK Depth API) com grade frontal (`11x8` raios) para detectar fisicamente pernas erguidas, chutes frontais/diagonais e elevação de joelhos dentro do campo de visão do headset.
+  - Filtragem em 5 camadas: remoção de piso MRUK, remoção de tronco superior, envelope anatômico das pernas, exclusão de braços/mãos/controles via `OVRBody` + anchors, e subtração de ambiente estático (volumes MRUK + **Captura de Fundo Depth** por voxels `0,11 m`).
+- **Fusão no Motor Próprio (`ProprietaryFootTrackingSolver`):**
+  - Quando a câmera de profundidade detecta chute ou elevação de joelho, destrava o pé do piso imediatamente (`IsFootLocked = false`), direciona o solver analítico IK e marca a proveniência como **`DEPTH_3D`** (**Amarelo**), diferenciando visualmente de `SDK_GEN` (Ciano), `SDK_OBS` (Verde), `ENG_IK` (Laranja) e `ENG_PRED` (Magenta).
+- **Nuvem de Pontos Depth 3D + Controles no VR UI:**
+  - Esferas amarelas mostram em tempo real exatamente onde o sensor Depth está enxergando suas pernas no Passthrough e no Espelho.
+  - Novos botões no Live Tracking, Calibração e Configurações: `CAPTURAR FUNDO (1.5s)` (ou clique no **Analógico Esquerdo**), `DEPTH LEG: ON/OFF`, `NUVEM 3D: ON/OFF` e `LIMPAR FUNDO DEPTH`.
+- **Limitações Físicas Esperadas:**
+  - O Depth API cobre o cone frontal das câmeras (`~±36°` horizontal, `~-46°..+6°` vertical na nossa grade, alcance útil `0,20–2,3 m`). Chutes atrás das costas ou movimentos fora da visão da câmera retornam suavemente para `Generative Legs + IK`.
 "@
 
 if ($releaseExists) {

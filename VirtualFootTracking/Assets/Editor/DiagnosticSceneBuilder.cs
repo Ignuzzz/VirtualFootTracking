@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using Meta.XR;
 using Meta.XR.MRUtilityKit;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -37,7 +38,8 @@ namespace VirtualFootTracking.Editor
             OVRCameraRig cameraRig = CreateCameraRigWithPassthrough();
             OVRBody ovrBody = CreateOvrBody(cameraRig.gameObject);
             MRUK mruk = CreateMruk();
-            CreateVirtualFootTrackingSystem(cameraRig, ovrBody, mruk);
+            EnvironmentRaycastManager raycastManager = CreateEnvironmentRaycastManager();
+            CreateVirtualFootTrackingSystem(cameraRig, ovrBody, mruk, raycastManager);
 
             bool saved = EditorSceneManager.SaveScene(scene, DiagnosticScenePath);
             if (!saved)
@@ -136,12 +138,23 @@ namespace VirtualFootTracking.Editor
             return fallback.AddComponent<MRUK>();
         }
 
-        private static void CreateVirtualFootTrackingSystem(OVRCameraRig cameraRig, OVRBody ovrBody, MRUK mruk)
+        private static EnvironmentRaycastManager CreateEnvironmentRaycastManager()
+        {
+            GameObject rayGo = new GameObject("MetaEnvironmentRaycast");
+            return rayGo.AddComponent<EnvironmentRaycastManager>();
+        }
+
+        private static void CreateVirtualFootTrackingSystem(
+            OVRCameraRig cameraRig,
+            OVRBody ovrBody,
+            MRUK mruk,
+            EnvironmentRaycastManager raycastManager)
         {
             GameObject sysGo = new GameObject("VirtualFootTrackingSystem");
 
             MetaOvrBodyTrackingProvider bodyProvider = sysGo.AddComponent<MetaOvrBodyTrackingProvider>();
             MrukSpatialMappingProvider spatialProvider = sysGo.AddComponent<MrukSpatialMappingProvider>();
+            EnvironmentDepthLegDetector depthDetector = sysGo.AddComponent<EnvironmentDepthLegDetector>();
             GuidedCalibrationProvider calibrationProvider = sysGo.AddComponent<GuidedCalibrationProvider>();
             ProprietaryFootTrackingSolver proprietarySolver = sysGo.AddComponent<ProprietaryFootTrackingSolver>();
             DiagnosticPassthroughFootSolver rawDiagnosticSolver = sysGo.AddComponent<DiagnosticPassthroughFootSolver>();
@@ -164,6 +177,12 @@ namespace VirtualFootTracking.Editor
             SetSerializedObjectRefIfFound(spatialSo, "_cameraRig", cameraRig);
             spatialSo.ApplyModifiedPropertiesWithoutUndo();
 
+            SerializedObject depthSo = new SerializedObject(depthDetector);
+            SetSerializedObjectRefIfFound(depthSo, "_raycastManager", raycastManager);
+            SetSerializedObjectRefIfFound(depthSo, "_cameraRig", cameraRig);
+            SetSerializedObjectRefIfFound(depthSo, "_mruk", mruk);
+            depthSo.ApplyModifiedPropertiesWithoutUndo();
+
             SerializedObject lpSo = new SerializedObject(laserPointer);
             SetSerializedObjectRefIfFound(lpSo, "_cameraRig", cameraRig);
             lpSo.ApplyModifiedPropertiesWithoutUndo();
@@ -172,6 +191,7 @@ namespace VirtualFootTracking.Editor
             SetSerializedObjectRefIfFound(rtSo, "_cameraRig", cameraRig);
             SetSerializedObjectRefIfFound(rtSo, "_bodyProvider", bodyProvider);
             SetSerializedObjectRefIfFound(rtSo, "_spatialProvider", spatialProvider);
+            SetSerializedObjectRefIfFound(rtSo, "_depthDetector", depthDetector);
             SetSerializedObjectRefIfFound(rtSo, "_calibrationProvider", calibrationProvider);
             SetSerializedObjectRefIfFound(rtSo, "_proprietarySolver", proprietarySolver);
             SetSerializedObjectRefIfFound(rtSo, "_rawDiagnosticSolver", rawDiagnosticSolver);

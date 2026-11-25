@@ -24,7 +24,8 @@ namespace VirtualFootTracking.Core
         SdkObserved = 1,
         SdkEstimatedGenerativeLegs = 2,
         EngineBiomechanicalFallback = 3,
-        EngineMotionPredicted = 4
+        EngineMotionPredicted = 4,
+        DepthObserved = 5
     }
 
     /// <summary>
@@ -113,6 +114,8 @@ namespace VirtualFootTracking.Core
                     return "ENG_IK";
                 case TrackingDataSource.EngineMotionPredicted:
                     return "ENG_PRED";
+                case TrackingDataSource.DepthObserved:
+                    return "DEPTH_3D";
                 default:
                     return "UNAVAIL";
             }

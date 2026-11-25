@@ -25,6 +25,7 @@ namespace VirtualFootTracking.Runtime
         [Header("Modular Providers")]
         [SerializeField] private MetaOvrBodyTrackingProvider _bodyProvider;
         [SerializeField] private MrukSpatialMappingProvider _spatialProvider;
+        [SerializeField] private EnvironmentDepthLegDetector _depthDetector;
         [SerializeField] private GuidedCalibrationProvider _calibrationProvider;
         [SerializeField] private ProprietaryFootTrackingSolver _proprietarySolver;
         [SerializeField] private DiagnosticPassthroughFootSolver _rawDiagnosticSolver;
@@ -73,6 +74,11 @@ namespace VirtualFootTracking.Runtime
             _spatial.Initialize();
             _calibration.Initialize();
 
+            Meta.XR.MRUtilityKit.MRUK mruk = Meta.XR.MRUtilityKit.MRUK.Instance != null
+                ? Meta.XR.MRUtilityKit.MRUK.Instance
+                : FindAnyObjectByType<Meta.XR.MRUtilityKit.MRUK>();
+            _depthDetector.Initialize(_cameraRig, mruk);
+
             _proprietarySolver.SetSpatialMappingProvider(_spatial);
             _proprietarySolver.Initialize(_calibration.CurrentProfile);
             _rawDiagnosticSolver.Initialize(_calibration.CurrentProfile);
@@ -100,6 +106,7 @@ namespace VirtualFootTracking.Runtime
                     _proprietarySolver,
                     _kalmanPredictor,
                     _visualizer,
+                    _depthDetector,
                     () => _engineMode,
                     mode => EngineMode = mode,
                     () => _spatial.RequestSceneReload(),
@@ -172,6 +179,14 @@ namespace VirtualFootTracking.Runtime
 
             _solveStopwatch.Restart();
             double now = Time.realtimeSinceStartupAsDouble;
+
+            DepthObservationFrame depthFrame = _depthDetector.ScanFrame(
+                skeleton,
+                floor,
+                _calibration.CurrentProfile,
+                Time.deltaTime);
+            _proprietarySolver.SetLatestDepthObservation(depthFrame);
+
             VirtualTrackerFrame frame;
             activeSolver.Solve(skeleton, floor, Time.deltaTime, now, out frame);
 
@@ -189,6 +204,7 @@ namespace VirtualFootTracking.Runtime
             {
                 bool kalmanOn = _engineMode == TrackingEngineMode.ProprietaryEngine && _kalmanPredictor != null && _kalmanPredictor.Enabled;
                 _diagnosticsProvider.SetPipelineInfo(_engineMode, kalmanOn, activeSolver.SolverName);
+                _diagnosticsProvider.SetDepthTelemetry(depthFrame, _proprietarySolver.EnableDepthLegFusion);
             }
 
             _diagnostics.RecordFrame(
@@ -203,6 +219,7 @@ namespace VirtualFootTracking.Runtime
             if (_visualizer != null)
             {
                 _visualizer.UpdateVisuals(skeleton, floor, frame, headTransform);
+                _visualizer.UpdateDepthVisuals(depthFrame);
             }
 
             if (_vrUi != null)
@@ -232,7 +249,14 @@ namespace VirtualFootTracking.Runtime
             if (calibratePressed && _calibrationProvider != null)
             {
                 _calibrationProvider.StartGuidedStandingCapture();
+                _depthDetector?.StartBackgroundCapture(1.5f);
                 _vrUi?.SetScreen(VrUiScreen.Calibration);
+            }
+
+            bool captureDepthBg = OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick) || Input.GetKeyDown(KeyCode.D);
+            if (captureDepthBg)
+            {
+                _depthDetector?.StartBackgroundCapture(1.5f);
             }
 
             bool mirrorToggle = OVRInput.GetDown(OVRInput.Button.Two) || Input.GetKeyDown(KeyCode.M);
@@ -283,6 +307,7 @@ namespace VirtualFootTracking.Runtime
             if (_cameraRig == null) _cameraRig = FindAnyObjectByType<OVRCameraRig>();
             if (_bodyProvider == null) _bodyProvider = GetComponent<MetaOvrBodyTrackingProvider>() ?? gameObject.AddComponent<MetaOvrBodyTrackingProvider>();
             if (_spatialProvider == null) _spatialProvider = GetComponent<MrukSpatialMappingProvider>() ?? gameObject.AddComponent<MrukSpatialMappingProvider>();
+            if (_depthDetector == null) _depthDetector = GetComponent<EnvironmentDepthLegDetector>() ?? gameObject.AddComponent<EnvironmentDepthLegDetector>();
             if (_calibrationProvider == null) _calibrationProvider = GetComponent<GuidedCalibrationProvider>() ?? gameObject.AddComponent<GuidedCalibrationProvider>();
             if (_proprietarySolver == null) _proprietarySolver = GetComponent<ProprietaryFootTrackingSolver>() ?? gameObject.AddComponent<ProprietaryFootTrackingSolver>();
             if (_rawDiagnosticSolver == null) _rawDiagnosticSolver = GetComponent<DiagnosticPassthroughFootSolver>() ?? gameObject.AddComponent<DiagnosticPassthroughFootSolver>();
