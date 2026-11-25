@@ -142,13 +142,16 @@ namespace VirtualFootTracking.Editor
 
             MetaOvrBodyTrackingProvider bodyProvider = sysGo.AddComponent<MetaOvrBodyTrackingProvider>();
             MrukSpatialMappingProvider spatialProvider = sysGo.AddComponent<MrukSpatialMappingProvider>();
-            BasicCalibrationProvider calibrationProvider = sysGo.AddComponent<BasicCalibrationProvider>();
-            DiagnosticPassthroughFootSolver footSolver = sysGo.AddComponent<DiagnosticPassthroughFootSolver>();
-            NullMotionPredictor motionPredictor = sysGo.AddComponent<NullMotionPredictor>();
+            GuidedCalibrationProvider calibrationProvider = sysGo.AddComponent<GuidedCalibrationProvider>();
+            ProprietaryFootTrackingSolver proprietarySolver = sysGo.AddComponent<ProprietaryFootTrackingSolver>();
+            DiagnosticPassthroughFootSolver rawDiagnosticSolver = sysGo.AddComponent<DiagnosticPassthroughFootSolver>();
+            AdaptiveKalmanMotionPredictor kalmanPredictor = sysGo.AddComponent<AdaptiveKalmanMotionPredictor>();
+            NullMotionPredictor nullPredictor = sysGo.AddComponent<NullMotionPredictor>();
             DiagnosticLogTrackerOutput trackerOutput = sysGo.AddComponent<DiagnosticLogTrackerOutput>();
             RuntimeDiagnosticsProvider diagnosticsProvider = sysGo.AddComponent<RuntimeDiagnosticsProvider>();
             SkeletonAndTrackerVisualizer visualizer = sysGo.AddComponent<SkeletonAndTrackerVisualizer>();
-            DiagnosticVrHud hud = sysGo.AddComponent<DiagnosticVrHud>();
+            VirtualFootTrackingVrUi vrUi = sysGo.AddComponent<VirtualFootTrackingVrUi>();
+            VrControllerLaserPointer laserPointer = sysGo.AddComponent<VrControllerLaserPointer>();
             VirtualFootTrackingRuntime runtime = sysGo.AddComponent<VirtualFootTrackingRuntime>();
 
             SerializedObject bodySo = new SerializedObject(bodyProvider);
@@ -161,17 +164,24 @@ namespace VirtualFootTracking.Editor
             SetSerializedObjectRefIfFound(spatialSo, "_cameraRig", cameraRig);
             spatialSo.ApplyModifiedPropertiesWithoutUndo();
 
+            SerializedObject lpSo = new SerializedObject(laserPointer);
+            SetSerializedObjectRefIfFound(lpSo, "_cameraRig", cameraRig);
+            lpSo.ApplyModifiedPropertiesWithoutUndo();
+
             SerializedObject rtSo = new SerializedObject(runtime);
             SetSerializedObjectRefIfFound(rtSo, "_cameraRig", cameraRig);
             SetSerializedObjectRefIfFound(rtSo, "_bodyProvider", bodyProvider);
             SetSerializedObjectRefIfFound(rtSo, "_spatialProvider", spatialProvider);
             SetSerializedObjectRefIfFound(rtSo, "_calibrationProvider", calibrationProvider);
-            SetSerializedObjectRefIfFound(rtSo, "_footSolver", footSolver);
-            SetSerializedObjectRefIfFound(rtSo, "_motionPredictor", motionPredictor);
+            SetSerializedObjectRefIfFound(rtSo, "_proprietarySolver", proprietarySolver);
+            SetSerializedObjectRefIfFound(rtSo, "_rawDiagnosticSolver", rawDiagnosticSolver);
+            SetSerializedObjectRefIfFound(rtSo, "_kalmanPredictor", kalmanPredictor);
+            SetSerializedObjectRefIfFound(rtSo, "_nullPredictor", nullPredictor);
             SetSerializedObjectRefIfFound(rtSo, "_trackerOutput", trackerOutput);
             SetSerializedObjectRefIfFound(rtSo, "_diagnosticsProvider", diagnosticsProvider);
             SetSerializedObjectRefIfFound(rtSo, "_visualizer", visualizer);
-            SetSerializedObjectRefIfFound(rtSo, "_hud", hud);
+            SetSerializedObjectRefIfFound(rtSo, "_vrUi", vrUi);
+            SetSerializedObjectRefIfFound(rtSo, "_laserPointer", laserPointer);
             rtSo.ApplyModifiedPropertiesWithoutUndo();
         }
 

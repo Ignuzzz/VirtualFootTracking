@@ -1,16 +1,22 @@
-using System.Collections.Generic;
 using UnityEngine;
 using VirtualFootTracking.Core;
 
 namespace VirtualFootTracking.Visualization
 {
     /// <summary>
-    /// Runtime diagnostic visualizer for the 84-joint FullBody skeleton, the 4 virtual trackers,
-    /// and the MRUK/fallback floor plane. Differentiates observed vs SDK-estimated vs unavailable data by color.
+    /// Phase 2 visualizer rendering:
+    /// 1) Optional raw 84-joint FullBody SDK skeleton (World + Mirror),
+    /// 2) Thick solved biomechanical lower-body leg rig (Hip -> Knee -> Ankle -> Foot Sole),
+    /// 3) The 4 virtual FBT trackers with local XYZ axes, floor drop lines, and ground-contact rings,
+    /// 4) The MRUK or fallback floor plane.
     /// </summary>
     public class SkeletonAndTrackerVisualizer : MonoBehaviour
     {
         private const int MaxFullBodyJoints = 84;
+        private const int HipsJointIndex = 1;
+        private const int LeftUpperLegIndex = 70;
+        private const int RightUpperLegIndex = 77;
+        private const int GroundRingSegments = 20;
 
         private static readonly (int a, int b)[] BoneConnections =
         {
@@ -20,21 +26,16 @@ namespace VirtualFootTracking.Visualization
             (5, 8), (8, 10), (10, 11), (11, 19), (19, 18),
             // Right Arm
             (5, 13), (13, 15), (15, 16), (16, 45), (45, 44),
-            // Left Leg (Hip -> UpperLeg -> LowerLeg/Knee -> Ankle -> Ball)
+            // Left Leg (SDK raw)
             (1, 70), (70, 71), (71, 73), (73, 76),
-            // Right Leg (Hip -> UpperLeg -> LowerLeg/Knee -> Ankle -> Ball)
+            // Right Leg (SDK raw)
             (1, 77), (77, 78), (78, 80), (80, 83)
         };
 
         [Header("Display Options")]
-        [SerializeField]
-        private bool _showSkeleton = true;
-
-        [SerializeField]
-        private bool _showMirrorRig = true;
-
-        [SerializeField]
-        private float _mirrorForwardDistanceMeters = 1.35f;
+        [SerializeField] private bool _showRawSdkSkeleton = true;
+        [SerializeField] private bool _showMirrorRig = true;
+        [SerializeField] private float _mirrorForwardDistanceMeters = 1.35f;
 
         private Transform _worldRoot;
         private Transform _mirrorRoot;
@@ -49,6 +50,9 @@ namespace VirtualFootTracking.Visualization
 
         private readonly TrackerVisualRig[] _worldTrackerVisuals = new TrackerVisualRig[4];
         private readonly TrackerVisualRig[] _mirrorTrackerVisuals = new TrackerVisualRig[4];
+
+        private SolvedLegRig _worldSolvedLegs;
+        private SolvedLegRig _mirrorSolvedLegs;
 
         private LineRenderer _floorOutline;
         private GameObject _floorQuad;
@@ -67,6 +71,26 @@ namespace VirtualFootTracking.Visualization
             public LineRenderer AxisY;
             public LineRenderer AxisZ;
             public LineRenderer FloorDropLine;
+        }
+
+        private struct SolvedLegRig
+        {
+            public LineRenderer LeftThigh;
+            public LineRenderer LeftShin;
+            public LineRenderer RightThigh;
+            public LineRenderer RightShin;
+            public GameObject LeftFootPlate;
+            public Material LeftFootPlateMat;
+            public GameObject RightFootPlate;
+            public Material RightFootPlateMat;
+            public LineRenderer LeftContactRing;
+            public LineRenderer RightContactRing;
+        }
+
+        public bool IsRawSkeletonVisible
+        {
+            get => _showRawSdkSkeleton;
+            set => _showRawSdkSkeleton = value;
         }
 
         public bool IsMirrorViewEnabled
@@ -104,6 +128,9 @@ namespace VirtualFootTracking.Visualization
                 _mirrorTrackerVisuals[i] = CreateTrackerRig(_mirrorRoot, $"MirrorTracker_{id}");
             }
 
+            _worldSolvedLegs = CreateSolvedLegRig(_worldRoot, "WorldSolved");
+            _mirrorSolvedLegs = CreateSolvedLegRig(_mirrorRoot, "MirrorSolved");
+
             CreateFloorVisuals(_worldRoot);
         }
 
@@ -137,7 +164,7 @@ namespace VirtualFootTracking.Visualization
             UpdateSkeletonRig(
                 skeleton,
                 Vector3.zero,
-                _showSkeleton,
+                _showRawSdkSkeleton,
                 _worldJointSpheres,
                 _worldJointMaterials,
                 _worldBoneLines);
@@ -145,7 +172,7 @@ namespace VirtualFootTracking.Visualization
             UpdateSkeletonRig(
                 skeleton,
                 _mirrorOffsetWorld,
-                _showSkeleton && _showMirrorRig,
+                _showRawSdkSkeleton && _showMirrorRig,
                 _mirrorJointSpheres,
                 _mirrorJointMaterials,
                 _mirrorBoneLines);
@@ -157,6 +184,9 @@ namespace VirtualFootTracking.Visualization
                 UpdateTrackerRig(_worldTrackerVisuals[i], sample, floor.WorldHeightY, Vector3.zero, true);
                 UpdateTrackerRig(_mirrorTrackerVisuals[i], sample, floor.WorldHeightY, _mirrorOffsetWorld, _showMirrorRig);
             }
+
+            UpdateSolvedLegRig(_worldSolvedLegs, skeleton, frame, floor.WorldHeightY, Vector3.zero, true);
+            UpdateSolvedLegRig(_mirrorSolvedLegs, skeleton, frame, floor.WorldHeightY, _mirrorOffsetWorld, _showMirrorRig);
         }
 
         private void BuildSkeletonPool(
@@ -174,7 +204,7 @@ namespace VirtualFootTracking.Visualization
                 GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 sphere.name = $"{prefix}_Joint_{i}";
                 sphere.transform.SetParent(parent, false);
-                sphere.transform.localScale = Vector3.one * 0.024f;
+                sphere.transform.localScale = Vector3.one * 0.018f;
                 DestroyCollider(sphere);
 
                 Material mat = CreateMaterial(Color.gray);
@@ -192,7 +222,7 @@ namespace VirtualFootTracking.Visualization
             boneLines = new LineRenderer[BoneConnections.Length];
             for (int i = 0; i < BoneConnections.Length; i++)
             {
-                boneLines[i] = CreateLine(parent, $"{prefix}_Bone_{i}", 0.010f, Color.cyan);
+                boneLines[i] = CreateLine(parent, $"{prefix}_Bone_{i}", 0.007f, Color.cyan);
                 boneLines[i].enabled = false;
             }
         }
@@ -224,6 +254,54 @@ namespace VirtualFootTracking.Visualization
             cube.SetActive(false);
             rig.FloorDropLine.enabled = false;
             return rig;
+        }
+
+        private SolvedLegRig CreateSolvedLegRig(Transform parent, string prefix)
+        {
+            SolvedLegRig rig = new SolvedLegRig
+            {
+                LeftThigh = CreateLine(parent, $"{prefix}_LThigh", 0.022f, Color.cyan),
+                LeftShin = CreateLine(parent, $"{prefix}_LShin", 0.018f, Color.cyan),
+                RightThigh = CreateLine(parent, $"{prefix}_RThigh", 0.022f, Color.cyan),
+                RightShin = CreateLine(parent, $"{prefix}_RShin", 0.018f, Color.cyan),
+                LeftFootPlate = CreateFootPlate(parent, $"{prefix}_LFootPlate", out Material lfMat),
+                LeftFootPlateMat = lfMat,
+                RightFootPlate = CreateFootPlate(parent, $"{prefix}_RFootPlate", out Material rfMat),
+                RightFootPlateMat = rfMat,
+                LeftContactRing = CreateRing(parent, $"{prefix}_LContactRing", 0.008f, Color.green),
+                RightContactRing = CreateRing(parent, $"{prefix}_RContactRing", 0.008f, Color.green)
+            };
+            rig.LeftThigh.enabled = false;
+            rig.LeftShin.enabled = false;
+            rig.RightThigh.enabled = false;
+            rig.RightShin.enabled = false;
+            rig.LeftFootPlate.SetActive(false);
+            rig.RightFootPlate.SetActive(false);
+            rig.LeftContactRing.enabled = false;
+            rig.RightContactRing.enabled = false;
+            return rig;
+        }
+
+        private GameObject CreateFootPlate(Transform parent, string name, out Material mat)
+        {
+            GameObject plate = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            plate.name = name;
+            plate.transform.SetParent(parent, false);
+            plate.transform.localScale = new Vector3(0.085f, 0.022f, 0.21f);
+            DestroyCollider(plate);
+
+            mat = CreateMaterial(Color.cyan);
+            Renderer r = plate.GetComponent<Renderer>();
+            if (r != null) r.sharedMaterial = mat;
+            return plate;
+        }
+
+        private LineRenderer CreateRing(Transform parent, string name, float width, Color color)
+        {
+            LineRenderer lr = CreateLine(parent, name, width, color);
+            lr.loop = true;
+            lr.positionCount = GroundRingSegments;
+            return lr;
         }
 
         private void CreateFloorVisuals(Transform parent)
@@ -301,13 +379,9 @@ namespace VirtualFootTracking.Visualization
             if (!visible || !skeleton.IsAvailable || skeleton.Joints == null)
             {
                 for (int i = 0; i < spheres.Length; i++)
-                {
                     spheres[i].SetActive(false);
-                }
                 for (int i = 0; i < boneLines.Length; i++)
-                {
                     boneLines[i].enabled = false;
-                }
                 return;
             }
 
@@ -343,6 +417,145 @@ namespace VirtualFootTracking.Visualization
                 {
                     boneLines[i].enabled = false;
                 }
+            }
+        }
+
+        private void UpdateSolvedLegRig(
+            in SolvedLegRig rig,
+            in BodySkeletonSnapshot skeleton,
+            in VirtualTrackerFrame frame,
+            float floorY,
+            Vector3 worldOffset,
+            bool visible)
+        {
+            if (!visible)
+            {
+                rig.LeftThigh.enabled = false;
+                rig.LeftShin.enabled = false;
+                rig.RightThigh.enabled = false;
+                rig.RightShin.enabled = false;
+                rig.LeftFootPlate.SetActive(false);
+                rig.RightFootPlate.SetActive(false);
+                rig.LeftContactRing.enabled = false;
+                rig.RightContactRing.enabled = false;
+                return;
+            }
+
+            Vector3 leftHip = ResolveHipAnchor(skeleton, LeftUpperLegIndex, -0.10f);
+            Vector3 rightHip = ResolveHipAnchor(skeleton, RightUpperLegIndex, 0.10f);
+
+            UpdateSingleSolvedLeg(
+                leftHip,
+                frame.LeftKnee,
+                frame.LeftFoot,
+                floorY,
+                worldOffset,
+                rig.LeftThigh,
+                rig.LeftShin,
+                rig.LeftFootPlate,
+                rig.LeftFootPlateMat,
+                rig.LeftContactRing);
+
+            UpdateSingleSolvedLeg(
+                rightHip,
+                frame.RightKnee,
+                frame.RightFoot,
+                floorY,
+                worldOffset,
+                rig.RightThigh,
+                rig.RightShin,
+                rig.RightFootPlate,
+                rig.RightFootPlateMat,
+                rig.RightContactRing);
+        }
+
+        private static Vector3 ResolveHipAnchor(in BodySkeletonSnapshot skeleton, int upperLegIdx, float sideOffset)
+        {
+            if (skeleton.IsAvailable)
+            {
+                if (skeleton.TryGetJoint(upperLegIdx, out BodyJointSample ul) && ul.PositionValid)
+                    return ul.WorldPosition;
+
+                if (skeleton.TryGetJoint(HipsJointIndex, out BodyJointSample hips) && hips.PositionValid)
+                {
+                    Vector3 right = hips.OrientationValid ? (hips.WorldRotation * Vector3.right) : Vector3.right;
+                    return hips.WorldPosition + right * sideOffset;
+                }
+            }
+            return Vector3.zero;
+        }
+
+        private static void UpdateSingleSolvedLeg(
+            Vector3 hipWorld,
+            in VirtualTrackerSample knee,
+            in VirtualTrackerSample foot,
+            float floorY,
+            Vector3 worldOffset,
+            LineRenderer thighLine,
+            LineRenderer shinLine,
+            GameObject footPlate,
+            Material footPlateMat,
+            LineRenderer contactRing)
+        {
+            bool validLeg = hipWorld.sqrMagnitude > 0.0001f &&
+                            knee.Validity != TrackerValidityState.Invalid &&
+                            foot.Validity != TrackerValidityState.Invalid;
+
+            if (validLeg)
+            {
+                Vector3 h = hipWorld + worldOffset;
+                Vector3 k = knee.Position + worldOffset;
+                Vector3 f = foot.Position + worldOffset;
+                Color legColor = ColorForSource(foot.Source, foot.Validity);
+
+                thighLine.enabled = true;
+                SetWorldLine(thighLine, h, k);
+                thighLine.startColor = legColor;
+                thighLine.endColor = legColor;
+
+                shinLine.enabled = true;
+                SetWorldLine(shinLine, k, f);
+                shinLine.startColor = legColor;
+                shinLine.endColor = legColor;
+            }
+            else
+            {
+                thighLine.enabled = false;
+                shinLine.enabled = false;
+            }
+
+            if (foot.Validity != TrackerValidityState.Invalid)
+            {
+                footPlate.SetActive(true);
+                Vector3 footPos = foot.Position + worldOffset;
+                footPlate.transform.rotation = foot.Rotation;
+                // Offset plate slightly downward/forward relative to ankle so it depicts a real shoe sole.
+                footPlate.transform.position = footPos + foot.Rotation * new Vector3(0f, -0.045f, 0.055f);
+                footPlateMat.color = ColorForSource(foot.Source, foot.Validity);
+
+                if (foot.IsGrounded)
+                {
+                    contactRing.enabled = true;
+                    Color ringColor = foot.IsFootLocked ? new Color(0.20f, 0.96f, 0.45f) : new Color(1.0f, 0.85f, 0.20f);
+                    contactRing.startColor = ringColor;
+                    contactRing.endColor = ringColor;
+                    Vector3 center = new Vector3(footPos.x, floorY + 0.006f, footPos.z);
+                    float radius = 0.11f;
+                    for (int i = 0; i < GroundRingSegments; i++)
+                    {
+                        float angle = (i / (float)GroundRingSegments) * Mathf.PI * 2f;
+                        contactRing.SetPosition(i, center + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius));
+                    }
+                }
+                else
+                {
+                    contactRing.enabled = false;
+                }
+            }
+            else
+            {
+                footPlate.SetActive(false);
+                contactRing.enabled = false;
             }
         }
 
@@ -389,7 +602,7 @@ namespace VirtualFootTracking.Visualization
 
         private static Color ColorForSource(TrackingDataSource source, TrackerValidityState validity)
         {
-            if (validity == TrackerValidityState.Invalid || validity == TrackerValidityState.TemporarilyLost)
+            if (validity == TrackerValidityState.Invalid)
                 return new Color(1f, 0.23f, 0.23f);
 
             switch (source)

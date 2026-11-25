@@ -13,26 +13,25 @@
 3. **Iluminação e Oclusão do IOBT:**
    - Rastreamento IOBT degrada em ambientes escuros, roupas muito largas ou quando os braços ocultam o torso das câmeras inferiores do headset.
 
-4. **Bloqueio de Instalação Automatizada na Fase 1:**
-   - Nesta máquina, a instalação do Unity Editor `6000.0.85f2` via CLI sem privilégios administrativos foi bloqueada pelo UAC (`ELEVATION_FAILED`), e nenhuma conta Unity estava autenticada nem um Quest 3S conectado via USB. Portanto, **o primeiro build de APK e os testes em headset dependem das etapas manuais descritas em `03_Installation_and_Build_Guide.md`**.
+4. **Limites de Predição e Fallback (`v0.2.0`):**
+   - `AdaptiveKalmanMotionPredictor` extrapola perdas temporárias por no máximo `0,35s` com decaimento exponencial de velocidade (`EngineMotionPredicted`) e depois retorna `Invalid` para não simular dados inexistentes.
+   - A transmissão externa via Wi-Fi UDP/USB para o driver SteamVR OpenVR (`GenericTracker`) pertence à Etapa 3.
 
 ---
 
 ## 2. Roadmap de Desenvolvimento
 
-### Etapa 1 — Validação Diagnóstica no Quest 3S (Atual — pronta para build)
-- Compilar `VirtualFootTracking_v0.1_Diag.apk` e rodar em hardware real no Quest 3S.
-- Medir FPS, frequência real do `OVRBody.BodyState`, qualidade do `FloorAnchors` MRUK e comportamento cru do `Generative Legs` durante caminhada, agachamento e chutes (com o botão `Y` desligado e ligado).
+### Etapa 1 — Validação Diagnóstica no Quest 3S (**Concluída em `v0.1.0-diag`**)
+- Compilado `VirtualFootTracking_v0.1_Diag.apk` (`46,46 MB`) e validado pelo usuário no Quest 3S em hardware real (esqueleto IOBT + Generative Legs em pé e sentado + piso/passthrough).
 
-### Etapa 2 — Foot Tracking Engine Próprio (Pós-validação de sensores)
-- **Solver Biomecânico & IK (`IFootTrackingSolver`):**
-  - Reconstrução analítica da cadeia `Quadril -> Joelho -> Tornozelo -> Pé` respeitando comprimentos calibrados de coxa/canela, limites anatômicos de flexão do joelho (0° a ~140°, sem hiperextensão) e plano coronal.
-  - Detecção de fase de apoio (*stance*) vs balanço (*swing*) combinando velocidade linear e proximidade do plano de piso MRUK.
-  - Prevenção suave de penetração no piso e estabilização de pé apoiado (*foot locking* sem deslizamento artificial).
-- **Predição e Filtragem (`IMotionPredictor`):**
-  - Substituir `NullMotionPredictor` por Filtro de Kalman / filtro adaptativo baseado em velocidade/aceleração (alta responsividade em picos de chute, baixa oscilação quando parado), marcando explicitamente amostras preditas como `TrackingDataSource.EngineMotionPredicted`.
-- **Interface VR Completa:**
-  - Telas dedicadas de Menu Principal, Assistente de Calibração (com ajuste manual de altura, coxa, canela, largura de base, distância dos pés e offsets individuais), Live Tracking 3D e Diagnóstico completo.
+### Etapa 2 — Foot Tracking Engine Próprio (**Implementada em `v0.2.0-engine`**)
+- **Solver Biomecânico & IK (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`):**
+  - Reconstrução analítica 2-bone (`Quadril -> Joelho -> Tornozelo`) respeitando comprimentos calibrados de coxa/canela e limites anatômicos (`2°–148°`) sem inversão do joelho.
+  - Detecção de fase *Stance* vs *Swing* com histerese e *Foot Locking* elástico ancorado no piso MRUK (evita penetração e deslizamento parado, soltando imediatamente em chutes rápidos).
+- **Predição e Filtragem (`AdaptiveKalmanMotionPredictor`):**
+  - Filtro de Kalman com ganho adaptativo por inovação/velocidade e extrapolação amortecida (até `0,35s`) marcada explicitamente como `TrackingDataSource.EngineMotionPredicted`.
+- **Interface VR Completa (`VirtualFootTrackingVrUi` + `VrControllerLaserPointer`) & Calibração (`GuidedCalibrationProvider`):**
+  - 5 painéis interativos por raio laser nos controles Touch Plus (Menu Principal, Calibração guiada `2,5s` + ajustes manuais, Live Tracking com alternância A/B, Configurações/Offsets e Diagnóstico completo).
 
 ### Etapa 3 — Streaming PC + Driver SteamVR OpenVR
 - Implementar `UdpTrackerOutput` (Wi-Fi UDP baixa latência + fallback USB `adb forward`) serializando `TrackerPacketFrame` (`VFT1`).

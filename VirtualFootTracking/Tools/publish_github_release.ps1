@@ -1,16 +1,16 @@
-param(
+﻿param(
     [string]$RepoName = "VirtualFootTracking",
     [ValidateSet("public", "private")]
     [string]$Visibility = "public",
-    [string]$Tag = "v0.1.0-diag",
-    [string]$Title = "Virtual Foot Tracking v0.1.0 (Quest 3S Phase 1 Diagnostic)"
+    [string]$Tag = "v0.2.0-engine",
+    [string]$Title = "Virtual Foot Tracking v0.2.0 — Foot Tracking Engine + Calibration + VR UI (Quest 3S)"
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $ProjectDir "..")).Path
-$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.1_Diag.apk"
+$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.2_Engine.apk"
 
 if (-not (Test-Path $ApkPath)) {
     Write-Error "APK not found at $ApkPath. Run .\Tools\build_apk.ps1 first."
@@ -63,10 +63,17 @@ $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = "Stop"
 
 $notes = @"
-Meta Quest 3S Phase 1 Diagnostic Build (`v0.1.0`):
-- Unity `6000.0.85f2` LTS (IL2CPP ARM64, OpenXR + Meta XR Core `209.0.0` + MRUK `209.0.0`)
-- FullBody (`84` joints) + High Fidelity IOBT (`SdkObserved` vs `SdkEstimatedGenerativeLegs`)
-- MRUK Floor Anchor detection + Passthrough Underlay + 4 Virtual Trackers (`L-Foot`, `R-Foot`, `L-Knee`, `R-Knee`)
+Meta Quest 3S Phase 2 — Proprietary Foot Tracking Engine (`v0.2.0`):
+- **Foot Tracking Engine Próprio (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`):**
+  - Cinemática inversa analítica 2-bone (`Quadril -> Joelho -> Tornozelo`) com limites anatômicos (`2°–148°`) e prevenção de hiperextensão/inversão do joelho em agachamentos, sentar e chutes.
+  - Detecção de contato com o piso MRUK (`Stance` vs `Swing`), **Foot Locking** elástico anti-deslizamento e bloqueio de penetração no chão.
+  - Fallback biomecânico (`EngineBiomechanicalFallback`) quando dados inferiores do SDK estiverem ausentes.
+- **Filtro de Kalman Adaptativo (`AdaptiveKalmanMotionPredictor`):**
+  - Baixo jitter quando apoiado, alta responsividade em chutes/movimentos rápidos de combate e predição amortecida (até `0,35s`) em perda temporária (`EngineMotionPredicted`).
+- **Calibração Guiada & Manual (`GuidedCalibrationProvider`):**
+  - Captura automática de postura em pé (`2,5s`) + ajustes manuais de altura, coxa, canela, quadril, distância dos pés, largura da base, yaw inicial e offsets individuais.
+- **Interface VR Interativa (5 painéis) + Laser Pointer nos controles Touch Plus:**
+  - Menu Principal, Calibração, Live Tracking (com alternância A/B ao vivo entre Motor Próprio e SDK Bruto), Configurações/Offsets e Diagnóstico Completo.
 "@
 
 if ($releaseExists) {

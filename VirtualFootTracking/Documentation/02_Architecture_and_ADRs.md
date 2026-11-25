@@ -11,28 +11,28 @@ flowchart LR
 
     BTP --> RT["VirtualFootTrackingRuntime"]
     SMP --> RT
-    CAL["BasicCalibrationProvider\n(ICalibrationProvider)"] --> RT
+    CAL["GuidedCalibrationProvider\n(ICalibrationProvider)"] --> RT
 
-    RT --> SOLV["DiagnosticPassthroughFootSolver\n(IFootTrackingSolver)"]
-    SOLV --> PRED["NullMotionPredictor\n(IMotionPredictor)"]
+    RT --> SOLV["ProprietaryFootTrackingSolver + AnalyticLegIkSolver\n(ou DiagnosticPassthroughFootSolver A/B)"]
+    SOLV --> PRED["AdaptiveKalmanMotionPredictor\n(ou NullMotionPredictor)"]
 
     PRED --> OUT["DiagnosticLogTrackerOutput\n(ITrackerOutput)"]
     PRED --> DIAG["RuntimeDiagnosticsProvider\n(IDiagnosticsProvider)"]
-    PRED --> VIS["SkeletonAndTrackerVisualizer\n& DiagnosticVrHud"]
+    PRED --> VIS["SkeletonAndTrackerVisualizer\n& VirtualFootTrackingVrUi + LaserPointer"]
 ```
 
 ---
 
 ## 2. Contratos Principais (`Assets/Scripts/Core/Interfaces/`)
 
-| Interface | Responsabilidade | Implementação Fase 1 |
+| Interface | Responsabilidade | Implementação Atual (Fase 2) |
 | :--- | :--- | :--- |
 | `IBodyTrackingProvider` | Gerenciar permissão `BODY_TRACKING`, configurar `FullBody` + `High` IOBT e fornecer `BodySkeletonSnapshot`. | `MetaOvrBodyTrackingProvider` |
 | `ISpatialMappingProvider` | Gerenciar permissão `USE_SCENE`, carregar sala do dispositivo via `MRUK`, expor polígono/altura do piso (`FloorPlaneData`) e raycast vertical no piso. | `MrukSpatialMappingProvider` |
-| `IFootTrackingSolver` | Transformar o esqueleto + plano do piso + calibração nos quatro trackers virtuais (`VirtualTrackerFrame`). | `DiagnosticPassthroughFootSolver` |
-| `ICalibrationProvider` | Estimar medidas antropométricas automáticas a partir da altura HMD/chão e persistir `CalibrationProfile` em JSON. | `BasicCalibrationProvider` |
-| `ITrackerOutput` | Consumir quadros resolvidos (buffer de diagnóstico na Fase 1; transporte UDP/USB na Fase 2). | `DiagnosticLogTrackerOutput` |
-| `IDiagnosticsProvider` | Medir FPS, frequência real de atualização de body tracking (Hz), latência do solver (ms), perdas e erros recentes. | `RuntimeDiagnosticsProvider` |
+| `IFootTrackingSolver` | Transformar o esqueleto + plano do piso + calibração nos quatro trackers virtuais (`VirtualTrackerFrame`). | `ProprietaryFootTrackingSolver` (com alternância A/B para `DiagnosticPassthroughFootSolver`) |
+| `ICalibrationProvider` | Captura guiada multi-frame em pé (`2,5s`), ajustes manuais granulares e persistência JSON (`CalibrationProfile`). | `GuidedCalibrationProvider` |
+| `ITrackerOutput` | Consumir quadros resolvidos (buffer de diagnóstico local; pronto para UDP/USB na Fase 3). | `DiagnosticLogTrackerOutput` |
+| `IDiagnosticsProvider` | Medir FPS, frequência real de atualização de body tracking (Hz), latência do solver+Kalman (ms), modo ativo e erros. | `RuntimeDiagnosticsProvider` |
 
 ---
 
@@ -73,8 +73,10 @@ Para nunca misturar espaços de coordenadas sem transformação explícita:
 ### ADR-002 — Built-in Render Pipeline (BiRP) + Passthrough Underlay na Fase 1
 - Utilizar BiRP + `UnityEngine.UI.Text` (`LegacyRuntime.ttf`) + `OVRPassthroughLayer` (`Underlay`) garante criação e compilação headless sem exigir importação manual de assets TMP/URP e permite ao usuário enxergar o **chão físico real** sob os trackers virtuais durante testes de chute e caminhada em Quest 3S.
 
-### ADR-003 — Modo Diagnóstico Cru Antes do Solver Biomecânico Avançado
-- O `DiagnosticPassthroughFootSolver` inicia com `_enableFloorPenetrationClamp = false` (alternável pelo botão `Y`) e `NullMotionPredictor`, expondo sem maquiagem qualquer penetração no piso ou atraso das estimativas de pernas da Meta antes da implementação do solver IK + Kalman da Fase 2.
+### ADR-003 — Foot Tracking Engine Próprio + Modo A/B Diagnóstico (`v0.2.0`)
+- `ProprietaryFootTrackingSolver` combina detecção de piso MRUK (`TryQueryFloorHeightAt`), histerese de contato (*Stance* vs *Swing* com *Foot Locking* elástico de `0,09m` para liberar chutes rápidos instantaneamente), `AnalyticLegIkSolver` (limites anatômicos `2°–148°` com polo anterior anti-hiperextensão) e `EngineBiomechanicalFallback` quando juntas inferiores estiverem inválidas.
+- `AdaptiveKalmanMotionPredictor` escala o ruído de processo $Q$ dinamicamente entre repouso (`0,25`) e movimentos explosivos de combate (`320,0`), extrapolando perdas momentâneas por até `0,35s` com marcação explícita `EngineMotionPredicted` (Magenta).
+- O usuário pode alternar em tempo real entre o Motor Próprio e o `DiagnosticPassthroughFootSolver` (botão `Y` ou UI Live Tracking) para comparação A/B direta no headset.
 
 ### ADR-004 — Blueprint de Comunicação PC / SteamVR (`TrackerPacketSchema.cs`)
-- O schema `TrackerPacketFrame` (`Magic = "VFT1"`, versão `1`, `SequenceNumber`, `MonotonicTimestampNs`, `FloorHeightWorldY` e `4 × TrackerWireEntry`) já prepara o payload que será transmitido via UDP Wi-Fi (ou USB ADB forward) para o futuro driver C++ `openvr` (`vr::ITrackedDeviceServerDriver` registrado como `vr::TrackedDeviceClass_GenericTracker`) na Fase 2/3.
+- O schema `TrackerPacketFrame` (`Magic = "VFT1"`, versão `1`, `SequenceNumber`, `MonotonicTimestampNs`, `FloorHeightWorldY` e `4 × TrackerWireEntry`) já prepara o payload que será transmitido via UDP Wi-Fi (ou USB ADB forward) para o futuro driver C++ `openvr` (`vr::ITrackedDeviceServerDriver` registrado como `vr::TrackedDeviceClass_GenericTracker`) na Fase 3.

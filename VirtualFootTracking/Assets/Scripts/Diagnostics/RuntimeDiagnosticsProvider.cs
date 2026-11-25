@@ -103,6 +103,13 @@ namespace VirtualFootTracking.Diagnostics
             }
         }
 
+        public void SetPipelineInfo(TrackingEngineMode mode, bool kalmanEnabled, string solverName)
+        {
+            _latestSnapshot.ActiveEngineMode = mode;
+            _latestSnapshot.KalmanPredictorEnabled = kalmanEnabled;
+            _latestSnapshot.ActiveSolverName = solverName ?? string.Empty;
+        }
+
         public void RecordError(string message)
         {
             if (string.IsNullOrWhiteSpace(message))

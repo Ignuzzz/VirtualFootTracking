@@ -31,7 +31,8 @@
 | **Unity Hub** | Ausente | **Instalado** | `4.0.1.65535` (MSIX `UnityTechnologies.UnityHub`) | Instalado via `winget` |
 | **Unity Editor `6000.0.85f2` LTS + Android SDK/NDK r27c/OpenJDK 17** | Ausente | **Instalado** | `C:\Users\Bruno\Unity\Editors\6000.0.85f2\Editor\Unity.exe` | Android SDK (`34`–`37.0`), Build-Tools `36.0.0`, NDK `27.2.12479018`, OpenJDK `17` |
 | **Licença Unity (Unity ID)** | Ausente | **Ativa** | Conta Unity (`brunoviciobr@gmail.com`) | `Unity Personal` (`Assigned`) |
-| **APK Diagnóstico Quest 3S** | Ausente | **Compilado e Validado (`aapt2`)** | `Builds\VirtualFootTracking_v0.1_Diag.apk` (`46,46 MB`) | `arm64-v8a`, `BODY_TRACKING`, `USE_SCENE`, `UnityPlayerGameActivity` (`enabled=true`) |
+| **APK Diagnóstico Quest 3S (Fase 1)** | Ausente | **Validado (`v0.1.0`)** | `Builds\VirtualFootTracking_v0.1_Diag.apk` (`46,46 MB`) | Validado no Quest 3S real pelo usuário |
+| **APK Foot Tracking Engine (Fase 2)** | Ausente | **Compilado e Validado (`aapt2`)** | `Builds\VirtualFootTracking_v0.2_Engine.apk` (`46,51 MB`) | `versionName=0.2.0`, `versionCode=2`, `arm64-v8a`, `BODY_TRACKING`, `USE_SCENE`, `UnityPlayerGameActivity` (`enabled=true`) |
 | **Meta Quest 3S via USB/ADB** | Desconectado | **Não conectado** | `adb devices -l` -> lista vazia | Necessário conectar cabo USB, ativar Modo Desenvolvedor e autorizar depuração RSA no headset |
 
 ---

@@ -13,8 +13,9 @@ using VirtualFootTracking.Visualization;
 namespace VirtualFootTracking.Runtime
 {
     /// <summary>
-    /// Top-level orchestrator connecting Meta Body Tracking, MRUK Spatial Mapping,
-    /// Calibration, Foot Tracking Solver, Motion Prediction, Diagnostics, and VR Visualization.
+    /// Top-level Phase 2 orchestrator connecting Meta Body Tracking, MRUK Spatial Mapping,
+    /// Guided & Manual Calibration, Proprietary Foot Tracking Solver (with Raw SDK A/B mode),
+    /// Adaptive Kalman Motion Predictor, Diagnostics, 4-Screen VR UI, and Ray Pointer.
     /// </summary>
     public class VirtualFootTrackingRuntime : MonoBehaviour
     {
@@ -24,26 +25,42 @@ namespace VirtualFootTracking.Runtime
         [Header("Modular Providers")]
         [SerializeField] private MetaOvrBodyTrackingProvider _bodyProvider;
         [SerializeField] private MrukSpatialMappingProvider _spatialProvider;
-        [SerializeField] private BasicCalibrationProvider _calibrationProvider;
-        [SerializeField] private DiagnosticPassthroughFootSolver _footSolver;
-        [SerializeField] private NullMotionPredictor _motionPredictor;
+        [SerializeField] private GuidedCalibrationProvider _calibrationProvider;
+        [SerializeField] private ProprietaryFootTrackingSolver _proprietarySolver;
+        [SerializeField] private DiagnosticPassthroughFootSolver _rawDiagnosticSolver;
+        [SerializeField] private AdaptiveKalmanMotionPredictor _kalmanPredictor;
+        [SerializeField] private NullMotionPredictor _nullPredictor;
         [SerializeField] private DiagnosticLogTrackerOutput _trackerOutput;
         [SerializeField] private RuntimeDiagnosticsProvider _diagnosticsProvider;
 
-        [Header("Visualization")]
+        [Header("Visualization & Interaction")]
         [SerializeField] private SkeletonAndTrackerVisualizer _visualizer;
-        [SerializeField] private DiagnosticVrHud _hud;
+        [SerializeField] private VirtualFootTrackingVrUi _vrUi;
+        [SerializeField] private VrControllerLaserPointer _laserPointer;
+
+        [Header("Mode")]
+        [SerializeField] private TrackingEngineMode _engineMode = TrackingEngineMode.ProprietaryEngine;
 
         private IBodyTrackingProvider _body;
         private ISpatialMappingProvider _spatial;
         private ICalibrationProvider _calibration;
-        private IFootTrackingSolver _solver;
-        private IMotionPredictor _predictor;
         private ITrackerOutput _output;
         private IDiagnosticsProvider _diagnostics;
 
         private readonly Stopwatch _solveStopwatch = new Stopwatch();
         private bool _initialCalibrationAttempted;
+
+        public TrackingEngineMode EngineMode
+        {
+            get => _engineMode;
+            set
+            {
+                if (_engineMode == value)
+                    return;
+                _engineMode = value;
+                _kalmanPredictor?.ResetState();
+            }
+        }
 
         private void Awake()
         {
@@ -55,18 +72,56 @@ namespace VirtualFootTracking.Runtime
             _body.Initialize();
             _spatial.Initialize();
             _calibration.Initialize();
-            _solver.Initialize(_calibration.CurrentProfile);
-            _predictor.ResetState();
+
+            _proprietarySolver.SetSpatialMappingProvider(_spatial);
+            _proprietarySolver.Initialize(_calibration.CurrentProfile);
+            _rawDiagnosticSolver.Initialize(_calibration.CurrentProfile);
+
+            _kalmanPredictor.ResetState();
+            _nullPredictor.ResetState();
             _output.Initialize();
+
+            if (_calibrationProvider != null)
+            {
+                _calibrationProvider.OnCalibrationUpdated += HandleCalibrationUpdated;
+            }
 
             Transform head = GetHeadTransform();
             if (_visualizer != null)
             {
                 _visualizer.Initialize();
             }
-            if (_hud != null)
+
+            if (_vrUi != null)
             {
-                _hud.Initialize(head);
+                _vrUi.Initialize(
+                    head,
+                    _calibrationProvider,
+                    _proprietarySolver,
+                    _kalmanPredictor,
+                    _visualizer,
+                    () => _engineMode,
+                    mode => EngineMode = mode,
+                    () => _spatial.RequestSceneReload(),
+                    () => _body.TryApplyHeightCalibration(_calibration.CurrentProfile.UserHeightMeters),
+                    () => RecenterAll(head));
+            }
+
+            if (_laserPointer != null)
+            {
+                _laserPointer.Initialize(_cameraRig);
+                if (_vrUi != null && _vrUi.UiCanvas != null)
+                {
+                    _laserPointer.RegisterCanvas(_vrUi.UiCanvas);
+                }
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_calibrationProvider != null)
+            {
+                _calibrationProvider.OnCalibrationUpdated -= HandleCalibrationUpdated;
             }
         }
 
@@ -80,7 +135,15 @@ namespace VirtualFootTracking.Runtime
             FloorPlaneData floor;
             _spatial.TryGetFloorData(out floor);
 
-            if (!_initialCalibrationAttempted && !_calibration.CurrentProfile.IsCalibrated && floor.IsValid)
+            // Advance guided standing capture if active
+            if (_calibrationProvider != null && _calibrationProvider.IsCalibrating)
+            {
+                if (_calibrationProvider.TickCalibration(skeleton, floor, Time.deltaTime))
+                {
+                    _body.TryApplyHeightCalibration(_calibrationProvider.CurrentProfile.UserHeightMeters);
+                }
+            }
+            else if (!_initialCalibrationAttempted && !_calibration.CurrentProfile.IsCalibrated && floor.IsValid)
             {
                 Transform head = GetHeadTransform();
                 if ((hasBody && skeleton.HeadWorldPosition.y > floor.WorldHeightY + 0.8f) ||
@@ -89,27 +152,45 @@ namespace VirtualFootTracking.Runtime
                     if (_calibration.BeginAutoCalibration(skeleton, floor))
                     {
                         _initialCalibrationAttempted = true;
-                        _solver.UpdateCalibration(_calibration.CurrentProfile);
                         _body.TryApplyHeightCalibration(_calibration.CurrentProfile.UserHeightMeters);
                     }
                 }
             }
 
+            IFootTrackingSolver activeSolver = _engineMode == TrackingEngineMode.ProprietaryEngine
+                ? (IFootTrackingSolver)_proprietarySolver
+                : _rawDiagnosticSolver;
+
+            IMotionPredictor activePredictor = _engineMode == TrackingEngineMode.ProprietaryEngine
+                ? (IMotionPredictor)_kalmanPredictor
+                : _nullPredictor;
+
+            if (_kalmanPredictor != null && floor.IsValid)
+            {
+                _kalmanPredictor.SetFloorHeight(floor.WorldHeightY);
+            }
+
             _solveStopwatch.Restart();
             double now = Time.realtimeSinceStartupAsDouble;
             VirtualTrackerFrame frame;
-            _solver.Solve(skeleton, floor, Time.deltaTime, now, out frame);
+            activeSolver.Solve(skeleton, floor, Time.deltaTime, now, out frame);
 
-            // Apply motion predictor per tracker (pass-through in Phase 1)
-            frame.LeftFoot = _predictor.ProcessSample(frame.LeftFoot, Time.deltaTime);
-            frame.RightFoot = _predictor.ProcessSample(frame.RightFoot, Time.deltaTime);
-            frame.LeftKnee = _predictor.ProcessSample(frame.LeftKnee, Time.deltaTime);
-            frame.RightKnee = _predictor.ProcessSample(frame.RightKnee, Time.deltaTime);
+            frame.LeftFoot = activePredictor.ProcessSample(frame.LeftFoot, Time.deltaTime);
+            frame.RightFoot = activePredictor.ProcessSample(frame.RightFoot, Time.deltaTime);
+            frame.LeftKnee = activePredictor.ProcessSample(frame.LeftKnee, Time.deltaTime);
+            frame.RightKnee = activePredictor.ProcessSample(frame.RightKnee, Time.deltaTime);
             _solveStopwatch.Stop();
 
             double latencyMs = _solveStopwatch.Elapsed.TotalMilliseconds;
 
             _output.Publish(frame);
+
+            if (_diagnosticsProvider != null)
+            {
+                bool kalmanOn = _engineMode == TrackingEngineMode.ProprietaryEngine && _kalmanPredictor != null && _kalmanPredictor.Enabled;
+                _diagnosticsProvider.SetPipelineInfo(_engineMode, kalmanOn, activeSolver.SolverName);
+            }
+
             _diagnostics.RecordFrame(
                 skeleton,
                 floor,
@@ -124,29 +205,34 @@ namespace VirtualFootTracking.Runtime
                 _visualizer.UpdateVisuals(skeleton, floor, frame, headTransform);
             }
 
-            if (_hud != null)
+            if (_vrUi != null)
             {
-                bool clampOn = _footSolver != null && _footSolver.EnableFloorPenetrationClamp;
-                bool mirrorOn = _visualizer != null && _visualizer.IsMirrorViewEnabled;
                 DiagnosticsSnapshot diag = _diagnostics.GetSnapshot();
-                _hud.UpdateHud(diag, _calibration.CurrentProfile, mirrorOn, clampOn, headTransform);
+                _vrUi.UpdateUi(diag, headTransform);
             }
+        }
+
+        private void HandleCalibrationUpdated(CalibrationProfile profile)
+        {
+            _proprietarySolver?.UpdateCalibration(profile);
+            _rawDiagnosticSolver?.UpdateCalibration(profile);
         }
 
         private void HandleUserInput()
         {
             Transform head = GetHeadTransform();
 
-            bool calibratePressed = OVRInput.GetDown(OVRInput.Button.One) || Input.GetKeyDown(KeyCode.C);
-            if (calibratePressed)
+            bool menuToggle = OVRInput.GetDown(OVRInput.Button.Start) || Input.GetKeyDown(KeyCode.Tab);
+            if (menuToggle && _vrUi != null)
             {
-                _body.TryGetLatestSnapshot(out BodySkeletonSnapshot skel);
-                _spatial.TryGetFloorData(out FloorPlaneData flr);
-                if (_calibration.BeginAutoCalibration(skel, flr))
-                {
-                    _solver.UpdateCalibration(_calibration.CurrentProfile);
-                    _body.TryApplyHeightCalibration(_calibration.CurrentProfile.UserHeightMeters);
-                }
+                _vrUi.ToggleMainMenuOrLive();
+            }
+
+            bool calibratePressed = OVRInput.GetDown(OVRInput.Button.One) || Input.GetKeyDown(KeyCode.C);
+            if (calibratePressed && _calibrationProvider != null)
+            {
+                _calibrationProvider.StartGuidedStandingCapture();
+                _vrUi?.SetScreen(VrUiScreen.Calibration);
             }
 
             bool mirrorToggle = OVRInput.GetDown(OVRInput.Button.Two) || Input.GetKeyDown(KeyCode.M);
@@ -161,24 +247,27 @@ namespace VirtualFootTracking.Runtime
                 _spatial.RequestSceneReload();
             }
 
-            bool toggleClamp = OVRInput.GetDown(OVRInput.Button.Four) || Input.GetKeyDown(KeyCode.F);
-            if (toggleClamp && _footSolver != null)
+            bool toggleEngineAb = OVRInput.GetDown(OVRInput.Button.Four) || Input.GetKeyDown(KeyCode.F);
+            if (toggleEngineAb)
             {
-                _footSolver.EnableFloorPenetrationClamp = !_footSolver.EnableFloorPenetrationClamp;
+                EngineMode = _engineMode == TrackingEngineMode.ProprietaryEngine
+                    ? TrackingEngineMode.RawSdkDiagnostic
+                    : TrackingEngineMode.ProprietaryEngine;
             }
 
             bool recenter = OVRInput.GetDown(OVRInput.Button.SecondaryThumbstick) || Input.GetKeyDown(KeyCode.Space);
             if (recenter)
             {
-                if (_hud != null)
-                {
-                    _hud.Recenter(head);
-                }
-                if (_visualizer != null)
-                {
-                    _visualizer.RecenterMirrorOffset(head);
-                }
+                RecenterAll(head);
             }
+        }
+
+        private void RecenterAll(Transform head)
+        {
+            if (_vrUi != null)
+                _vrUi.Recenter(head);
+            if (_visualizer != null)
+                _visualizer.RecenterMirrorOffset(head);
         }
 
         private Transform GetHeadTransform()
@@ -194,19 +283,20 @@ namespace VirtualFootTracking.Runtime
             if (_cameraRig == null) _cameraRig = FindAnyObjectByType<OVRCameraRig>();
             if (_bodyProvider == null) _bodyProvider = GetComponent<MetaOvrBodyTrackingProvider>() ?? gameObject.AddComponent<MetaOvrBodyTrackingProvider>();
             if (_spatialProvider == null) _spatialProvider = GetComponent<MrukSpatialMappingProvider>() ?? gameObject.AddComponent<MrukSpatialMappingProvider>();
-            if (_calibrationProvider == null) _calibrationProvider = GetComponent<BasicCalibrationProvider>() ?? gameObject.AddComponent<BasicCalibrationProvider>();
-            if (_footSolver == null) _footSolver = GetComponent<DiagnosticPassthroughFootSolver>() ?? gameObject.AddComponent<DiagnosticPassthroughFootSolver>();
-            if (_motionPredictor == null) _motionPredictor = GetComponent<NullMotionPredictor>() ?? gameObject.AddComponent<NullMotionPredictor>();
+            if (_calibrationProvider == null) _calibrationProvider = GetComponent<GuidedCalibrationProvider>() ?? gameObject.AddComponent<GuidedCalibrationProvider>();
+            if (_proprietarySolver == null) _proprietarySolver = GetComponent<ProprietaryFootTrackingSolver>() ?? gameObject.AddComponent<ProprietaryFootTrackingSolver>();
+            if (_rawDiagnosticSolver == null) _rawDiagnosticSolver = GetComponent<DiagnosticPassthroughFootSolver>() ?? gameObject.AddComponent<DiagnosticPassthroughFootSolver>();
+            if (_kalmanPredictor == null) _kalmanPredictor = GetComponent<AdaptiveKalmanMotionPredictor>() ?? gameObject.AddComponent<AdaptiveKalmanMotionPredictor>();
+            if (_nullPredictor == null) _nullPredictor = GetComponent<NullMotionPredictor>() ?? gameObject.AddComponent<NullMotionPredictor>();
             if (_trackerOutput == null) _trackerOutput = GetComponent<DiagnosticLogTrackerOutput>() ?? gameObject.AddComponent<DiagnosticLogTrackerOutput>();
             if (_diagnosticsProvider == null) _diagnosticsProvider = GetComponent<RuntimeDiagnosticsProvider>() ?? gameObject.AddComponent<RuntimeDiagnosticsProvider>();
             if (_visualizer == null) _visualizer = GetComponent<SkeletonAndTrackerVisualizer>() ?? gameObject.AddComponent<SkeletonAndTrackerVisualizer>();
-            if (_hud == null) _hud = GetComponent<DiagnosticVrHud>() ?? gameObject.AddComponent<DiagnosticVrHud>();
+            if (_vrUi == null) _vrUi = GetComponent<VirtualFootTrackingVrUi>() ?? gameObject.AddComponent<VirtualFootTrackingVrUi>();
+            if (_laserPointer == null) _laserPointer = GetComponent<VrControllerLaserPointer>() ?? gameObject.AddComponent<VrControllerLaserPointer>();
 
             _body = _bodyProvider;
             _spatial = _spatialProvider;
             _calibration = _calibrationProvider;
-            _solver = _footSolver;
-            _predictor = _motionPredictor;
             _output = _trackerOutput;
             _diagnostics = _diagnosticsProvider;
         }

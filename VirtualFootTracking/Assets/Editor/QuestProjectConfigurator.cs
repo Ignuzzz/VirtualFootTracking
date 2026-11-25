@@ -49,8 +49,8 @@ namespace VirtualFootTracking.Editor
             PlayerSettings.companyName = "VirtualFootTracking";
             PlayerSettings.productName = "VirtualFootTracking";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.virtualfoottracking.quest");
-            PlayerSettings.bundleVersion = "0.1.0";
-            PlayerSettings.Android.bundleVersionCode = 1;
+            PlayerSettings.bundleVersion = "0.2.0";
+            PlayerSettings.Android.bundleVersionCode = 2;
 
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;

@@ -25,6 +25,9 @@ namespace VirtualFootTracking.Core
         public VirtualTrackerFrame CurrentFrame;
         public int TrackingLossEventsCount;
         public int ConsecutiveBodyLossFrames;
+        public TrackingEngineMode ActiveEngineMode;
+        public bool KalmanPredictorEnabled;
+        public string ActiveSolverName;
         public string StatusMessage;
         public string[] RecentErrors;
     }

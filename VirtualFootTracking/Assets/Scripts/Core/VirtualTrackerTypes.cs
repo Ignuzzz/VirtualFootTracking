@@ -49,6 +49,15 @@ namespace VirtualFootTracking.Core
     }
 
     /// <summary>
+    /// Active solving pipeline mode (supports live A/B comparison in VR).
+    /// </summary>
+    public enum TrackingEngineMode
+    {
+        ProprietaryEngine = 0,
+        RawSdkDiagnostic = 1
+    }
+
+    /// <summary>
     /// Standardized state snapshot for a single virtual FBT device.
     /// </summary>
     [Serializable]
@@ -67,6 +76,8 @@ namespace VirtualFootTracking.Core
         public float HeightAboveFloorMeters;
         public bool IsGrounded;
         public bool FloorClamped;
+        public bool IsFootLocked;
+        public bool IsIkSolved;
 
         public static VirtualTrackerSample CreateInvalid(VirtualTrackerId id, double timestampSeconds, CoordinateSpace space = CoordinateSpace.UnityWorldSpace)
         {
@@ -84,7 +95,9 @@ namespace VirtualFootTracking.Core
                 Space = space,
                 HeightAboveFloorMeters = 0f,
                 IsGrounded = false,
-                FloorClamped = false
+                FloorClamped = false,
+                IsFootLocked = false,
+                IsIkSolved = false
             };
         }
 
