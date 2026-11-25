@@ -1,0 +1,38 @@
+# Unity generated folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Ll]ogs/
+[Uu]serSettings/
+.utmp/
+MemoryCaptures/
+Recordings/
+
+# Visual Studio / Rider / IDE cache
+.vs/
+.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Builds (ignore binaries, keep directory marker)
+**/Builds/*.apk
+**/Builds/*.aab
+**/Builds/*.symbols.zip
+!**/Builds/.gitkeep
+
+# OS files
+Thumbs.db
+.DS_Store

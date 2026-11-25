@@ -1,0 +1,14 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/DiagnosticScene.unity
+    guid: c756f347d9c84514aad461fbab7f0be2
+  m_configObjects:
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 4ca404dcfbcb14543996099e98750488, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 2398f4678f0a0a94a8506b961033fe19, type: 2}
+  m_UseUCBPForAssetBundles: 0
