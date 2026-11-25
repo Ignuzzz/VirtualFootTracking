@@ -10,39 +10,45 @@ namespace VirtualFootTracking.SpatialMapping
     /// <summary>
     /// Uses Meta's real-time Depth API (EnvironmentRaycastManager) to detect moving
     /// lower-body limbs (kicks, lifted feet, raised knees) inside the forward camera frustum
-    /// after subtracting floor, upper body/arms/controllers, MRUK room volumes, and optional
-    /// static background voxels.
+    /// after subtracting floor, upper body/arms/controllers, MRUK room/surface shells,
+    /// planar vertical walls, continuous mid-range static voxels, and optional manual baseline voxels.
     /// </summary>
     public class EnvironmentDepthLegDetector : MonoBehaviour
     {
-        private const int MaxBufferPoints = 96;
+        private const int MaxBufferPoints = 136;
+        private const int MaxAutoStaticVoxels = 4096;
 
         // Verified OVRPlugin.BoneId indices (Meta XR Core SDK 209.0.0)
         private const int HipsJointIndex = 1;
         private const int HeadJointIndex = 7;
+        private const int LeftShoulderIndex = 8;
         private const int LeftArmUpperIndex = 10;
         private const int LeftArmLowerIndex = 11;
-        private const int LeftHandPalmIndex = 18;
-        private const int LeftHandWristIndex = 19;
+        private const int RightShoulderIndex = 13;
         private const int RightArmUpperIndex = 15;
         private const int RightArmLowerIndex = 16;
+        private const int LeftHandPalmIndex = 18;
+        private const int LeftHandWristIndex = 19;
         private const int RightHandPalmIndex = 44;
         private const int RightHandWristIndex = 45;
         private const int LeftUpperLegIndex = 70;
         private const int RightUpperLegIndex = 77;
+
+        private static readonly LabelFilter NonFloorCeilingFilter =
+            new LabelFilter(~(MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING));
 
         [Header("Scene References")]
         [SerializeField] private EnvironmentRaycastManager _raycastManager;
         [SerializeField] private OVRCameraRig _cameraRig;
         [SerializeField] private MRUK _mruk;
 
-        [Header("Scan Grid (88 rays max/frame)")]
-        [SerializeField] private int _gridColumns = 11;
-        [SerializeField] private int _gridRows = 8;
-        [SerializeField] private float _yawHalfAngleDeg = 36f;
-        [SerializeField] private float _pitchMinDeg = -46f;
-        [SerializeField] private float _pitchMaxDeg = 6f;
-        [SerializeField] private float _maxRayDistanceMeters = 2.3f;
+        [Header("Scan Grid (130 rays max/frame)")]
+        [SerializeField] private int _gridColumns = 13;
+        [SerializeField] private int _gridRows = 10;
+        [SerializeField] private float _yawHalfAngleDeg = 34f;
+        [SerializeField] private float _pitchMinDeg = -52f;
+        [SerializeField] private float _pitchMaxDeg = 2f;
+        [SerializeField] private float _maxRayDistanceMeters = 2.8f;
 
         [Header("Foreground Filtering")]
         [SerializeField] private bool _enabled = true;
@@ -52,16 +58,19 @@ namespace VirtualFootTracking.SpatialMapping
         [SerializeField] private float _handControllerExclusionRadius = 0.17f;
         [SerializeField] private float _forearmExclusionRadius = 0.14f;
         [SerializeField] private float _staticVoxelSizeMeters = 0.11f;
-        [SerializeField] private int _minClusterPoints = 4;
+        [SerializeField] private int _minClusterPoints = 3;
         [SerializeField] private float _surfaceToBoneInsetMeters = 0.04f;
 
         private readonly DepthForegroundPoint[] _foregroundBuffer = new DepthForegroundPoint[MaxBufferPoints];
         private readonly Vector3[] _leftCandidates = new Vector3[MaxBufferPoints];
+        private readonly Vector3[] _leftNormals = new Vector3[MaxBufferPoints];
         private readonly Vector3[] _rightCandidates = new Vector3[MaxBufferPoints];
+        private readonly Vector3[] _rightNormals = new Vector3[MaxBufferPoints];
         private readonly Vector3[] _inlierBuffer = new Vector3[MaxBufferPoints];
-        private readonly float[] _topDist = new float[3];
-        private readonly Vector3[] _topPts = new Vector3[3];
+        private readonly Vector3[] _inlierNormals = new Vector3[MaxBufferPoints];
+        private readonly float[] _latSortBuffer = new float[MaxBufferPoints];
         private readonly HashSet<Vector3Int> _staticBackgroundVoxels = new HashSet<Vector3Int>(512);
+        private readonly HashSet<Vector3Int> _autoStaticVoxels = new HashSet<Vector3Int>(1024);
 
         private float _backgroundCaptureRemaining;
         private float _backgroundCaptureTotal = 1.5f;
@@ -78,7 +87,7 @@ namespace VirtualFootTracking.SpatialMapping
         }
 
         public bool IsCapturingBackground => _backgroundCaptureRemaining > 0f;
-        public int StaticBackgroundVoxelCount => _staticBackgroundVoxels.Count;
+        public int StaticBackgroundVoxelCount => _staticBackgroundVoxels.Count + _autoStaticVoxels.Count;
 
         public void Initialize(OVRCameraRig cameraRig, MRUK mruk)
         {
@@ -112,6 +121,7 @@ namespace VirtualFootTracking.SpatialMapping
         public void StartBackgroundCapture(float durationSeconds = 1.5f)
         {
             _staticBackgroundVoxels.Clear();
+            _autoStaticVoxels.Clear();
             _backgroundCaptureTotal = Mathf.Max(0.4f, durationSeconds);
             _backgroundCaptureRemaining = _backgroundCaptureTotal;
         }
@@ -119,6 +129,7 @@ namespace VirtualFootTracking.SpatialMapping
         public void ClearBackgroundBaseline()
         {
             _staticBackgroundVoxels.Clear();
+            _autoStaticVoxels.Clear();
             _backgroundCaptureRemaining = 0f;
         }
 
@@ -145,8 +156,8 @@ namespace VirtualFootTracking.SpatialMapping
                 IsCapturingBackground = IsCapturingBackground,
                 BackgroundCaptureProgress01 = IsCapturingBackground
                     ? 1f - Mathf.Clamp01(_backgroundCaptureRemaining / Mathf.Max(0.01f, _backgroundCaptureTotal))
-                    : (_staticBackgroundVoxels.Count > 0 ? 1f : 0f),
-                StaticBackgroundVoxelCount = _staticBackgroundVoxels.Count,
+                    : (StaticBackgroundVoxelCount > 0 ? 1f : 0f),
+                StaticBackgroundVoxelCount = StaticBackgroundVoxelCount,
                 TotalRaysCast = 0,
                 RawHitCount = 0,
                 ForegroundPointCount = 0,
@@ -196,7 +207,7 @@ namespace VirtualFootTracking.SpatialMapping
             float thighLen = Mathf.Max(0.22f, cfg.ThighLengthMeters);
             float shinLen = Mathf.Max(0.22f, cfg.ShinLengthMeters);
             float ankleHeight = Mathf.Max(0.03f, cfg.AnkleToFloorMeters);
-            float maxLegReach = thighLen + shinLen + 0.24f;
+            float maxLegReach = thighLen + shinLen + 0.07f;
 
             // Background baseline calibration mode
             if (_backgroundCaptureRemaining > 0f)
@@ -215,7 +226,7 @@ namespace VirtualFootTracking.SpatialMapping
                 {
                     frame.StatusMessage = _backgroundCaptureRemaining > 0f
                         ? $"Capturando fundo statico ({frame.BackgroundCaptureProgress01 * 100f:F0}%)..."
-                        : $"Fundo capturado ({_staticBackgroundVoxels.Count} voxels)";
+                        : $"Fundo capturado ({StaticBackgroundVoxelCount} voxels)";
                 }
                 else
                 {
@@ -283,17 +294,32 @@ namespace VirtualFootTracking.SpatialMapping
                     if (pt.y <= floorY + _floorClearanceMeters)
                         continue;
 
+                    Vector3 fromPelvis = pt - pelvisPos;
+                    float distFromPelvis = fromPelvis.magnitude;
+
+                    // Continuous automatic static environment learning beyond physical leg reach
+                    if (distFromPelvis > maxLegReach + 0.08f)
+                    {
+                        if (pt.y > floorY + 0.08f && _autoStaticVoxels.Count < MaxAutoStaticVoxels)
+                        {
+                            _autoStaticVoxels.Add(ToVoxel(pt, invVoxel));
+                        }
+                        continue;
+                    }
+
                     // Layer 2: Upper-body / chest subtraction
                     if (pt.y >= pelvisPos.y + _pelvisUpperMarginMeters)
                         continue;
 
-                    // Layer 3: Anatomical leg reach envelope
-                    Vector3 fromPelvis = pt - pelvisPos;
-                    float distFromPelvis = fromPelvis.magnitude;
+                    // Layer 3: Tight anatomical leg reach envelope
                     if (distFromPelvis < _minDistFromPelvisMeters || distFromPelvis > maxLegReach)
                         continue;
 
-                    if (Vector3.Dot(fromPelvis, pelvisForwardFlat) < -0.35f)
+                    if (Vector3.Dot(fromPelvis, pelvisForwardFlat) < -0.18f)
+                        continue;
+
+                    float lateral = Vector3.Dot(fromPelvis, pelvisRightFlat);
+                    if (Mathf.Abs(lateral) > 0.56f)
                         continue;
 
                     // Layer 4: Arms, wrists, hands, controllers exclusion
@@ -312,19 +338,29 @@ namespace VirtualFootTracking.SpatialMapping
                          PointToSegmentSqrDistance(pt, rArmLow, rWrist) <= armExclSqr))
                         continue;
 
-                    // Layer 5: Static room environment (captured baseline voxels + MRUK scene volumes)
-                    if (_staticBackgroundVoxels.Count > 0 &&
-                        _staticBackgroundVoxels.Contains(ToVoxel(pt, invVoxel)))
+                    // Layer 5: Static room environment (manual baseline + auto-learned voxels + MRUK room/surface shells)
+                    Vector3Int ptVoxel = ToVoxel(pt, invVoxel);
+                    if (_staticBackgroundVoxels.Contains(ptVoxel) || _autoStaticVoxels.Contains(ptVoxel))
                         continue;
 
-                    if (room != null &&
-                        room.IsPositionInSceneVolume(pt, out MRUKAnchor volumeAnchor, true, 0.07f) &&
-                        volumeAnchor != null &&
-                        !volumeAnchor.HasAnyLabel(MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING))
-                        continue;
+                    if (room != null)
+                    {
+                        if (!room.IsPositionInRoom(pt, testVerticalBounds: true))
+                            continue;
 
-                    // Surviving foreground point -> assign Left (-1) vs Right (+1)
-                    sbyte side = AssignSide(pt, fromPelvis, pelvisRightFlat);
+                        if (room.IsPositionInSceneVolume(pt, out MRUKAnchor volumeAnchor, true, 0.09f) &&
+                            volumeAnchor != null &&
+                            !volumeAnchor.HasAnyLabel(MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING))
+                            continue;
+
+                        float surfDist = room.TryGetClosestSurfacePosition(pt, out _, out MRUKAnchor closestAnchor, NonFloorCeilingFilter);
+                        if (closestAnchor != null && surfDist <= 0.14f)
+                            continue;
+                    }
+
+                    // Surviving foreground point -> assign Left (-1) vs Right (+1) along corrected pelvisRightFlat
+                    sbyte side = AssignSide(pt, lateral);
+                    Vector3 validNormal = hit.normalConfidence >= 0.4f ? hit.normal : Vector3.zero;
 
                     if (fgCount < MaxBufferPoints)
                     {
@@ -338,11 +374,15 @@ namespace VirtualFootTracking.SpatialMapping
 
                     if (side < 0 && leftCount < MaxBufferPoints)
                     {
-                        _leftCandidates[leftCount++] = pt;
+                        _leftCandidates[leftCount] = pt;
+                        _leftNormals[leftCount] = validNormal;
+                        leftCount++;
                     }
                     else if (side > 0 && rightCount < MaxBufferPoints)
                     {
-                        _rightCandidates[rightCount++] = pt;
+                        _rightCandidates[rightCount] = pt;
+                        _rightNormals[rightCount] = validNormal;
+                        rightCount++;
                     }
                 }
             }
@@ -355,35 +395,44 @@ namespace VirtualFootTracking.SpatialMapping
                 return frame;
             }
 
+            frame.StaticBackgroundVoxelCount = StaticBackgroundVoxelCount;
             frame.ForegroundPointCount = fgCount;
 
             frame.LeftLeg = BuildLegObservation(
                 _leftCandidates,
+                _leftNormals,
                 leftCount,
                 headPos,
                 pelvisPos,
                 leftHipPos,
                 pelvisForwardFlat,
+                pelvisRightFlat,
                 floorY,
                 thighLen,
                 shinLen,
                 ankleHeight,
+                invVoxel,
                 ref _hasPrevLeft,
                 ref _prevLeftFoot);
 
             frame.RightLeg = BuildLegObservation(
                 _rightCandidates,
+                _rightNormals,
                 rightCount,
                 headPos,
                 pelvisPos,
                 rightHipPos,
                 pelvisForwardFlat,
+                pelvisRightFlat,
                 floorY,
                 thighLen,
                 shinLen,
                 ankleHeight,
+                invVoxel,
                 ref _hasPrevRight,
                 ref _prevRightFoot);
+
+            frame.StaticBackgroundVoxelCount = StaticBackgroundVoxelCount;
 
             if (!frame.IsReady)
             {
@@ -397,9 +446,7 @@ namespace VirtualFootTracking.SpatialMapping
             }
             else
             {
-                frame.StatusMessage = _staticBackgroundVoxels.Count > 0
-                    ? $"Depth pronto ({fgCount} pts < min {_minClusterPoints})"
-                    : $"Depth pronto ({fgCount} pts; capture fundo se houver moveis)";
+                frame.StatusMessage = $"Depth pronto ({fgCount} pts | autoBg={StaticBackgroundVoxelCount})";
             }
 
             return frame;
@@ -476,22 +523,22 @@ namespace VirtualFootTracking.SpatialMapping
             frame.BackgroundCaptureProgress01 = _backgroundCaptureRemaining > 0f
                 ? 1f - Mathf.Clamp01(_backgroundCaptureRemaining / Mathf.Max(0.01f, _backgroundCaptureTotal))
                 : 1f;
-            frame.StaticBackgroundVoxelCount = _staticBackgroundVoxels.Count;
+            frame.StaticBackgroundVoxelCount = StaticBackgroundVoxelCount;
             return anyReady;
         }
 
-        private sbyte AssignSide(Vector3 pt, Vector3 fromPelvis, Vector3 pelvisRightFlat)
+        private sbyte AssignSide(Vector3 pt, float lateral)
         {
-            float lateral = Vector3.Dot(fromPelvis, pelvisRightFlat);
             sbyte anatomicalSide = lateral < 0f ? (sbyte)-1 : (sbyte)1;
 
-            if (_hasPrevLeft && _hasPrevRight)
+            // Only use temporal tie-breaking very near the sagittal midline so Left vs Right stays accurate.
+            if (Mathf.Abs(lateral) < 0.09f && _hasPrevLeft && _hasPrevRight)
             {
                 float dL = Vector3.Distance(pt, _prevLeftFoot);
                 float dR = Vector3.Distance(pt, _prevRightFoot);
-                if (dL < 0.26f && dL + 0.08f < dR)
+                if (dL < 0.24f && dL + 0.06f < dR)
                     return -1;
-                if (dR < 0.26f && dR + 0.08f < dL)
+                if (dR < 0.24f && dR + 0.06f < dL)
                     return 1;
             }
 
@@ -500,15 +547,18 @@ namespace VirtualFootTracking.SpatialMapping
 
         private DepthLegObservation BuildLegObservation(
             Vector3[] candidates,
+            Vector3[] normals,
             int count,
             Vector3 headPos,
             Vector3 pelvisPos,
             Vector3 hipPos,
             Vector3 pelvisForwardFlat,
+            Vector3 pelvisRightFlat,
             float floorY,
             float thighLen,
             float shinLen,
             float ankleHeight,
+            float invVoxel,
             ref bool hasPrev,
             ref Vector3 prevAnchor)
         {
@@ -518,20 +568,50 @@ namespace VirtualFootTracking.SpatialMapping
                 return default;
             }
 
-            Vector3 centroid = Vector3.zero;
+            // Reject extreme lateral reach (> 0.48 m from this hip socket) before clustering
+            int hipValidCount = 0;
             for (int i = 0; i < count; i++)
             {
-                centroid += candidates[i];
-            }
-            centroid /= count;
-
-            const float maxClusterRadiusSqr = 0.38f * 0.38f;
-            int inlierCount = 0;
-            for (int i = 0; i < count; i++)
-            {
-                if ((candidates[i] - centroid).sqrMagnitude <= maxClusterRadiusSqr)
+                float latHip = Vector3.Dot(candidates[i] - hipPos, pelvisRightFlat);
+                if (Mathf.Abs(latHip) <= 0.48f)
                 {
-                    _inlierBuffer[inlierCount++] = candidates[i];
+                    _latSortBuffer[hipValidCount] = latHip;
+                    _inlierBuffer[hipValidCount] = candidates[i];
+                    _inlierNormals[hipValidCount] = normals[i];
+                    hipValidCount++;
+                }
+            }
+
+            if (hipValidCount < _minClusterPoints)
+            {
+                hasPrev = false;
+                return default;
+            }
+
+            // Compute median lateral coordinate in the leg's sagittal plane (preserves full extended shin + foot!)
+            Array.Sort(_latSortBuffer, 0, hipValidCount);
+            float medianLat = _latSortBuffer[hipValidCount / 2];
+
+            int inlierCount = 0;
+            float minLat = float.MaxValue;
+            float maxLat = float.MinValue;
+            float minY = float.MaxValue;
+            float maxY = float.MinValue;
+
+            for (int i = 0; i < hipValidCount; i++)
+            {
+                Vector3 pt = _inlierBuffer[i];
+                float lat = Vector3.Dot(pt - hipPos, pelvisRightFlat);
+                if (Mathf.Abs(lat - medianLat) <= 0.22f)
+                {
+                    _inlierBuffer[inlierCount] = pt;
+                    _inlierNormals[inlierCount] = _inlierNormals[i];
+                    inlierCount++;
+
+                    if (lat < minLat) minLat = lat;
+                    if (lat > maxLat) maxLat = lat;
+                    if (pt.y < minY) minY = pt.y;
+                    if (pt.y > maxY) maxY = pt.y;
                 }
             }
 
@@ -541,50 +621,104 @@ namespace VirtualFootTracking.SpatialMapping
                 return default;
             }
 
-            // Pick top-3 most distal hits from hip (weighted slightly toward forward kick direction)
-            for (int k = 0; k < 3; k++)
+            // Wide-slab rejection: wider than a single leg -> treat as wall/furniture and bake static voxels
+            if (maxLat - minLat > 0.36f)
             {
-                _topDist[k] = float.MinValue;
-                _topPts[k] = Vector3.zero;
+                AutoLearnClusterAsStatic(inlierCount, invVoxel);
+                hasPrev = false;
+                return default;
             }
+
+            // Planar vertical wall rejection even without MRUK room scan
+            int vertNormCount = 0;
+            Vector3 normSum = Vector3.zero;
+            for (int i = 0; i < inlierCount; i++)
+            {
+                Vector3 n = _inlierNormals[i];
+                if (n.sqrMagnitude > 0.5f && Mathf.Abs(n.y) < 0.22f)
+                {
+                    vertNormCount++;
+                    normSum += n;
+                }
+            }
+
+            if (vertNormCount >= 5 && normSum.sqrMagnitude > 0.2f &&
+                ((maxLat - minLat) > 0.26f || (maxY - minY) > 0.58f))
+            {
+                Vector3 planeNormal = normSum.normalized;
+                float minProj = float.MaxValue;
+                float maxProj = float.MinValue;
+                for (int i = 0; i < inlierCount; i++)
+                {
+                    float proj = Vector3.Dot(_inlierBuffer[i], planeNormal);
+                    if (proj < minProj) minProj = proj;
+                    if (proj > maxProj) maxProj = proj;
+                }
+
+                if (maxProj - minProj < 0.055f)
+                {
+                    AutoLearnClusterAsStatic(inlierCount, invVoxel);
+                    hasPrev = false;
+                    return default;
+                }
+            }
+
+            // Pick furthest supported inlier from hip without pulling back toward thigh centroid
+            const float neighborRadiusSqr = 0.26f * 0.26f;
+            int bestIdx = -1;
+            float bestDist = -1f;
+            bool hasExtendedInlier = false;
+            float extendedThreshold = thighLen * 1.12f;
 
             for (int i = 0; i < inlierCount; i++)
             {
-                Vector3 pt = _inlierBuffer[i];
-                float dHip = Vector3.Distance(pt, hipPos);
-                float fwd = Vector3.Dot(pt - hipPos, pelvisForwardFlat);
-                float score = dHip + Mathf.Max(0f, fwd) * 0.15f;
+                bool hasNeighbor = false;
+                for (int j = 0; j < inlierCount; j++)
+                {
+                    if (i == j)
+                        continue;
+                    if ((_inlierBuffer[i] - _inlierBuffer[j]).sqrMagnitude <= neighborRadiusSqr)
+                    {
+                        hasNeighbor = true;
+                        break;
+                    }
+                }
 
-                if (score > _topDist[0])
+                if (!hasNeighbor)
+                    continue;
+
+                float dHip = Vector3.Distance(_inlierBuffer[i], hipPos);
+                if (dHip > extendedThreshold)
                 {
-                    _topDist[2] = _topDist[1];
-                    _topPts[2] = _topPts[1];
-                    _topDist[1] = _topDist[0];
-                    _topPts[1] = _topPts[0];
-                    _topDist[0] = score;
-                    _topPts[0] = pt;
+                    hasExtendedInlier = true;
                 }
-                else if (score > _topDist[1])
+
+                if (dHip > bestDist)
                 {
-                    _topDist[2] = _topDist[1];
-                    _topPts[2] = _topPts[1];
-                    _topDist[1] = score;
-                    _topPts[1] = pt;
-                }
-                else if (score > _topDist[2])
-                {
-                    _topDist[2] = score;
-                    _topPts[2] = pt;
+                    bestDist = dHip;
+                    bestIdx = i;
                 }
             }
 
-            int topN = Mathf.Min(3, inlierCount);
-            Vector3 distalSurface = Vector3.zero;
-            for (int k = 0; k < topN; k++)
+            if (bestIdx < 0)
             {
-                distalSurface += _topPts[k];
+                hasPrev = false;
+                return default;
             }
-            distalSurface /= topN;
+
+            const float tipClusterRadiusSqr = 0.12f * 0.12f;
+            Vector3 bestPt = _inlierBuffer[bestIdx];
+            Vector3 tipSum = Vector3.zero;
+            int tipCount = 0;
+            for (int i = 0; i < inlierCount; i++)
+            {
+                if ((_inlierBuffer[i] - bestPt).sqrMagnitude <= tipClusterRadiusSqr)
+                {
+                    tipSum += _inlierBuffer[i];
+                    tipCount++;
+                }
+            }
+            Vector3 distalSurface = tipSum / Mathf.Max(1, tipCount);
 
             // Push slightly inward along camera ray to approximate skeletal joint center inside leg/shoe
             Vector3 rayToSurface = distalSurface - headPos;
@@ -592,7 +726,7 @@ namespace VirtualFootTracking.SpatialMapping
             Vector3 distalCenter = distalSurface + insetDir * _surfaceToBoneInsetMeters;
 
             float distalDistFromHip = Vector3.Distance(distalCenter, hipPos);
-            float confidence = Mathf.Clamp01(0.45f + (inlierCount - 3) * 0.08f);
+            float confidence = Mathf.Clamp01(0.48f + (inlierCount - 3) * 0.07f);
             confidence = Mathf.Min(confidence, 0.95f);
 
             DepthLegObservation obs = new DepthLegObservation
@@ -602,14 +736,14 @@ namespace VirtualFootTracking.SpatialMapping
                 PointCount = inlierCount
             };
 
-            // Case A: Raised bent knee where thigh/knee rises above hip-thigh standing depth while lower shin hangs down.
-            if (distalDistFromHip < thighLen * 1.18f && distalCenter.y > pelvisPos.y - 0.30f)
+            // Case A: Truly knee-dominant raised bent leg (no shin/foot observed past thigh length * 1.15)
+            if (distalDistFromHip < thighLen * 1.15f && !hasExtendedInlier && distalCenter.y > pelvisPos.y - 0.30f)
             {
                 obs.IsKneeDominant = true;
                 obs.HasKneeHint = true;
                 obs.KneeWorldPosition = distalCenter;
 
-                Vector3 hangingFoot = distalCenter + Vector3.down * (shinLen * 0.92f) - pelvisForwardFlat * 0.08f;
+                Vector3 hangingFoot = distalCenter + Vector3.down * (shinLen * 0.92f) - pelvisForwardFlat * 0.06f;
                 hangingFoot.y = Mathf.Max(floorY + ankleHeight, hangingFoot.y);
                 obs.FootWorldPosition = hangingFoot;
 
@@ -618,7 +752,7 @@ namespace VirtualFootTracking.SpatialMapping
                 return obs;
             }
 
-            // Case B: Extended kick or lifted foot/shin
+            // Case B: Observed shin/foot (straight kick, angled kick, or lifted foot)
             Vector3 footTarget = distalCenter;
             footTarget.y = Mathf.Max(floorY + ankleHeight, footTarget.y);
             obs.FootWorldPosition = footTarget;
@@ -627,7 +761,7 @@ namespace VirtualFootTracking.SpatialMapping
             Vector3 kneeSum = Vector3.zero;
             int kneeInliers = 0;
             float kneeMinDist = thighLen * 0.65f;
-            float kneeMaxDist = thighLen * 1.15f;
+            float kneeMaxDist = thighLen * 1.12f;
             for (int i = 0; i < inlierCount; i++)
             {
                 float d = Vector3.Distance(_inlierBuffer[i], hipPos);
@@ -649,6 +783,14 @@ namespace VirtualFootTracking.SpatialMapping
             hasPrev = true;
             prevAnchor = footTarget;
             return obs;
+        }
+
+        private void AutoLearnClusterAsStatic(int inlierCount, float invVoxel)
+        {
+            for (int i = 0; i < inlierCount && _autoStaticVoxels.Count < MaxAutoStaticVoxels; i++)
+            {
+                _autoStaticVoxels.Add(ToVoxel(_inlierBuffer[i], invVoxel));
+            }
         }
 
         private void ExtractExclusionGeometry(
@@ -732,19 +874,68 @@ namespace VirtualFootTracking.SpatialMapping
             out Vector3 leftHipPos,
             out Vector3 rightHipPos)
         {
-            pelvisForwardFlat = Vector3.ProjectOnPlane(headTransform.forward, Vector3.up);
-            if (skeleton.IsAvailable && skeleton.TryGetJoint(HipsJointIndex, out BodyJointSample hipsOri) && hipsOri.OrientationValid)
+            BodyJointSample lUl = default;
+            BodyJointSample rUl = default;
+            bool hasSdkLeftHip = skeleton.IsAvailable &&
+                                 skeleton.TryGetJoint(LeftUpperLegIndex, out lUl) &&
+                                 lUl.PositionValid;
+            bool hasSdkRightHip = skeleton.IsAvailable &&
+                                  skeleton.TryGetJoint(RightUpperLegIndex, out rUl) &&
+                                  rUl.PositionValid;
+
+            // Compute right vector directly from bilateral world joint positions (never bone-local WorldRotation * forward).
+            pelvisRightFlat = Vector3.zero;
+            if (hasSdkLeftHip && hasSdkRightHip)
             {
-                Vector3 hFwd = Vector3.ProjectOnPlane(hipsOri.WorldRotation * Vector3.forward, Vector3.up);
-                if (hFwd.sqrMagnitude > 0.001f)
+                Vector3 span = Vector3.ProjectOnPlane(rUl.WorldPosition - lUl.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.05f * 0.05f)
                 {
-                    pelvisForwardFlat = hFwd;
+                    pelvisRightFlat = span.normalized;
                 }
             }
+
+            if (pelvisRightFlat.sqrMagnitude < 0.001f && skeleton.IsAvailable &&
+                skeleton.TryGetJoint(LeftArmUpperIndex, out BodyJointSample lArm) && lArm.PositionValid &&
+                skeleton.TryGetJoint(RightArmUpperIndex, out BodyJointSample rArm) && rArm.PositionValid)
+            {
+                Vector3 span = Vector3.ProjectOnPlane(rArm.WorldPosition - lArm.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.08f * 0.08f)
+                {
+                    pelvisRightFlat = span.normalized;
+                }
+            }
+
+            if (pelvisRightFlat.sqrMagnitude < 0.001f && skeleton.IsAvailable &&
+                skeleton.TryGetJoint(LeftShoulderIndex, out BodyJointSample lSh) && lSh.PositionValid &&
+                skeleton.TryGetJoint(RightShoulderIndex, out BodyJointSample rSh) && rSh.PositionValid)
+            {
+                Vector3 span = Vector3.ProjectOnPlane(rSh.WorldPosition - lSh.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.08f * 0.08f)
+                {
+                    pelvisRightFlat = span.normalized;
+                }
+            }
+
+            if (pelvisRightFlat.sqrMagnitude < 0.001f)
+            {
+                Vector3 headRight = Vector3.ProjectOnPlane(headTransform.right, Vector3.up);
+                pelvisRightFlat = headRight.sqrMagnitude > 0.001f ? headRight.normalized : Vector3.right;
+            }
+
+            // Unity left-handed: Right x Up = Forward
+            pelvisForwardFlat = Vector3.Cross(pelvisRightFlat, Vector3.up).normalized;
             if (pelvisForwardFlat.sqrMagnitude < 0.001f)
+            {
                 pelvisForwardFlat = Vector3.forward;
-            pelvisForwardFlat.Normalize();
-            pelvisRightFlat = Vector3.Cross(Vector3.up, pelvisForwardFlat).normalized;
+            }
+
+            if (hasSdkLeftHip && hasSdkRightHip)
+            {
+                leftHipPos = lUl.WorldPosition;
+                rightHipPos = rUl.WorldPosition;
+                pelvisPos = (leftHipPos + rightHipPos) * 0.5f;
+                return;
+            }
 
             if (skeleton.IsAvailable && skeleton.TryGetJoint(HipsJointIndex, out BodyJointSample hips) && hips.PositionValid)
             {
@@ -765,16 +956,8 @@ namespace VirtualFootTracking.SpatialMapping
             }
 
             float halfHipWidth = Mathf.Clamp(profile.StanceWidthMeters * 0.28f, 0.08f, 0.16f);
-            leftHipPos = pelvisPos - pelvisRightFlat * halfHipWidth;
-            rightHipPos = pelvisPos + pelvisRightFlat * halfHipWidth;
-
-            if (skeleton.IsAvailable)
-            {
-                if (skeleton.TryGetJoint(LeftUpperLegIndex, out BodyJointSample lUl) && lUl.PositionValid)
-                    leftHipPos = lUl.WorldPosition;
-                if (skeleton.TryGetJoint(RightUpperLegIndex, out BodyJointSample rUl) && rUl.PositionValid)
-                    rightHipPos = rUl.WorldPosition;
-            }
+            leftHipPos = hasSdkLeftHip ? lUl.WorldPosition : pelvisPos - pelvisRightFlat * halfHipWidth;
+            rightHipPos = hasSdkRightHip ? rUl.WorldPosition : pelvisPos + pelvisRightFlat * halfHipWidth;
         }
 
         private Transform ResolveHeadTransform()

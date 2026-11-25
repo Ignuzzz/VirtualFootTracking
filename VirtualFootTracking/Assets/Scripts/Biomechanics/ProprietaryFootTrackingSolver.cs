@@ -13,6 +13,10 @@ namespace VirtualFootTracking.Biomechanics
         // Verified OVRPlugin.BoneId indices from Meta XR Core SDK 209.0.0
         private const int HipsJointIndex = 1;           // FullBody_Hips
         private const int HeadJointIndex = 7;           // FullBody_Head
+        private const int LeftShoulderIndex = 8;        // FullBody_LeftShoulder
+        private const int LeftArmUpperIndex = 10;       // FullBody_LeftArmUpper
+        private const int RightShoulderIndex = 13;      // FullBody_RightShoulder
+        private const int RightArmUpperIndex = 15;      // FullBody_RightArmUpper
         private const int LeftUpperLegIndex = 70;       // FullBody_LeftUpperLeg
         private const int LeftKneeIndex = 71;           // FullBody_LeftLowerLeg
         private const int LeftAnkleIndex = 73;          // FullBody_LeftFootAnkle
@@ -61,7 +65,7 @@ namespace VirtualFootTracking.Biomechanics
         private FootState _rightState;
         private long _frameIndex;
 
-        public string SolverName => "Phase3.ProprietaryDepthFusionSolver";
+        public string SolverName => "Phase3.ProprietaryDepthFusionSolver_v0.3.1";
 
         public bool EnableFloorClamp
         {
@@ -305,7 +309,7 @@ namespace VirtualFootTracking.Biomechanics
                 state.LastDepthHasKnee = depthLeg.HasKneeHint;
                 state.LastDepthIsKneeDominant = depthLeg.IsKneeDominant;
                 state.LastDepthConfidence = depthLeg.Confidence;
-                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 1f, dtSafe * 8.5f);
+                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 1f, dtSafe * 12.0f);
             }
             else
             {
@@ -573,18 +577,46 @@ namespace VirtualFootTracking.Biomechanics
 
         private static Vector3 ResolvePelvisForwardFlat(in BodySkeletonSnapshot skeleton)
         {
-            if (skeleton.TryGetJoint(HipsJointIndex, out BodyJointSample hips) && hips.OrientationValid)
+            Vector3 rightFlat = Vector3.zero;
+
+            if (skeleton.TryGetJoint(LeftUpperLegIndex, out BodyJointSample lUl) && lUl.PositionValid &&
+                skeleton.TryGetJoint(RightUpperLegIndex, out BodyJointSample rUl) && rUl.PositionValid)
             {
-                Vector3 fwd = Vector3.ProjectOnPlane(hips.WorldRotation * Vector3.forward, Vector3.up);
-                if (fwd.sqrMagnitude > 0.001f)
-                    return fwd.normalized;
+                Vector3 span = Vector3.ProjectOnPlane(rUl.WorldPosition - lUl.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.05f * 0.05f)
+                    rightFlat = span.normalized;
             }
 
-            if (Camera.main != null)
+            if (rightFlat.sqrMagnitude < 0.001f &&
+                skeleton.TryGetJoint(LeftArmUpperIndex, out BodyJointSample lArm) && lArm.PositionValid &&
+                skeleton.TryGetJoint(RightArmUpperIndex, out BodyJointSample rArm) && rArm.PositionValid)
             {
-                Vector3 camFwd = Vector3.ProjectOnPlane(Camera.main.transform.forward, Vector3.up);
-                if (camFwd.sqrMagnitude > 0.001f)
-                    return camFwd.normalized;
+                Vector3 span = Vector3.ProjectOnPlane(rArm.WorldPosition - lArm.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.08f * 0.08f)
+                    rightFlat = span.normalized;
+            }
+
+            if (rightFlat.sqrMagnitude < 0.001f &&
+                skeleton.TryGetJoint(LeftShoulderIndex, out BodyJointSample lSh) && lSh.PositionValid &&
+                skeleton.TryGetJoint(RightShoulderIndex, out BodyJointSample rSh) && rSh.PositionValid)
+            {
+                Vector3 span = Vector3.ProjectOnPlane(rSh.WorldPosition - lSh.WorldPosition, Vector3.up);
+                if (span.sqrMagnitude > 0.08f * 0.08f)
+                    rightFlat = span.normalized;
+            }
+
+            if (rightFlat.sqrMagnitude < 0.001f && Camera.main != null)
+            {
+                Vector3 camRight = Vector3.ProjectOnPlane(Camera.main.transform.right, Vector3.up);
+                if (camRight.sqrMagnitude > 0.001f)
+                    rightFlat = camRight.normalized;
+            }
+
+            if (rightFlat.sqrMagnitude > 0.001f)
+            {
+                Vector3 fwd = Vector3.Cross(rightFlat, Vector3.up);
+                if (fwd.sqrMagnitude > 0.001f)
+                    return fwd.normalized;
             }
 
             return Vector3.forward;

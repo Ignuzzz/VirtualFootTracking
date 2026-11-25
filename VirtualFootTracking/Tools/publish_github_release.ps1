@@ -2,15 +2,15 @@
     [string]$RepoName = "VirtualFootTracking",
     [ValidateSet("public", "private")]
     [string]$Visibility = "public",
-    [string]$Tag = "v0.3.0-depth",
-    [string]$Title = "Virtual Foot Tracking v0.3.0 — Real-Time Depth API Kick & Knee Detection (Quest 3S)"
+    [string]$Tag = "v0.3.1-depth",
+    [string]$Title = "Virtual Foot Tracking v0.3.1 — Depth Left/Right Fix, Auto Anti-Wall & Straight/Bent Knee"
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $ProjectDir "..")).Path
-$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.3_Depth.apk"
+$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.3.1_DepthFix.apk"
 
 if (-not (Test-Path $ApkPath)) {
     Write-Error "APK not found at $ApkPath. Run .\Tools\build_apk.ps1 first."
@@ -63,17 +63,14 @@ $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = "Stop"
 
 $notes = @"
-Meta Quest 3S Phase 3 — Real-Time Depth API Leg & Kick Detection (`v0.3.0`):
-- **Detecção Física em Tempo Real via Depth API (`EnvironmentDepthLegDetector`):**
-  - Usa o `EnvironmentRaycastManager` (Meta XR MRUK Depth API) com grade frontal (`11x8` raios) para detectar fisicamente pernas erguidas, chutes frontais/diagonais e elevação de joelhos dentro do campo de visão do headset.
-  - Filtragem em 5 camadas: remoção de piso MRUK, remoção de tronco superior, envelope anatômico das pernas, exclusão de braços/mãos/controles via `OVRBody` + anchors, e subtração de ambiente estático (volumes MRUK + **Captura de Fundo Depth** por voxels `0,11 m`).
-- **Fusão no Motor Próprio (`ProprietaryFootTrackingSolver`):**
-  - Quando a câmera de profundidade detecta chute ou elevação de joelho, destrava o pé do piso imediatamente (`IsFootLocked = false`), direciona o solver analítico IK e marca a proveniência como **`DEPTH_3D`** (**Amarelo**), diferenciando visualmente de `SDK_GEN` (Ciano), `SDK_OBS` (Verde), `ENG_IK` (Laranja) e `ENG_PRED` (Magenta).
-- **Nuvem de Pontos Depth 3D + Controles no VR UI:**
-  - Esferas amarelas mostram em tempo real exatamente onde o sensor Depth está enxergando suas pernas no Passthrough e no Espelho.
-  - Novos botões no Live Tracking, Calibração e Configurações: `CAPTURAR FUNDO (1.5s)` (ou clique no **Analógico Esquerdo**), `DEPTH LEG: ON/OFF`, `NUVEM 3D: ON/OFF` e `LIMPAR FUNDO DEPTH`.
-- **Limitações Físicas Esperadas:**
-  - O Depth API cobre o cone frontal das câmeras (`~±36°` horizontal, `~-46°..+6°` vertical na nossa grade, alcance útil `0,20–2,3 m`). Chutes atrás das costas ou movimentos fora da visão da câmera retornam suavemente para `Generative Legs + IK`.
+Meta Quest 3S Phase 3 Fix (`v0.3.1`) — Correções baseadas no teste real em hardware:
+- **Fix 1 — Separação Real Perna Esquerda vs. Direita (`EnvironmentDepthLegDetector` + `ProprietaryFootTrackingSolver`):**
+  - Corrigido o vetor de orientação da pelve: no skeleton `OVRBody`, `hips.WorldRotation * Vector3.forward` apontava lateralmente e rotulava a perna esquerda como direita. Agora o eixo lateral (`Right - Left`) e frontal (`Cross(Right, Up)`) são calculados diretamente a partir das juntas bilaterais de quadril/braços/ombros, com centro sagital exato entre os quadris.
+- **Fix 2 — Proteção Automática Contra Paredes/Móveis ("Movimentos Ghosts" em Salas Pequenas):**
+  - Verificação contínua via MRUK (`IsPositionInRoom` + `TryGetClosestSurfacePosition <= 0,14 m` para paredes/móveis), aprendizado automático contínuo de voxels estáticos fora do alcance da perna (`_autoStaticVoxels`, `0,11 m`), rejeição de planos verticais planos (paredes sem MRUK) e corredor anatômico mais justo (`coxa + canela + 0,07 m`).
+- **Fix 3 — Joelho Esticado vs. Joelho Dobrado (`Straight vs. Bent Knee`):**
+  - Substituído o filtro esférico centrado na coxa (que descartava canela e pé esticados) por um filtro no plano sagital da perna + extremidade distal suportada real sem puxar de volta para o joelho, com grade ampliada para `13×10` (`130` raios) e `MaxBufferPoints = 136`.
+  - Chutes esticados até a ponta do pé mantêm o joelho reto (`~2°–10°`), enquanto elevação apenas de joelho dobrado aciona `IsKneeDominant`.
 "@
 
 if ($releaseExists) {

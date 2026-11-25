@@ -10,7 +10,7 @@ namespace VirtualFootTracking.Editor
     /// </summary>
     public static class QuestBuildPipeline
     {
-        public const string OutputApkPath = "Builds/VirtualFootTracking_v0.3_Depth.apk";
+        public const string OutputApkPath = "Builds/VirtualFootTracking_v0.3.1_DepthFix.apk";
 
         [MenuItem("VirtualFootTracking/3. Build Quest 3S Depth APK")]
         public static void ConfigureBuildSceneAndApk()

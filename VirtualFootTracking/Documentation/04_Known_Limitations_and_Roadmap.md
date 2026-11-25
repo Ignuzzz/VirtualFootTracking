@@ -2,12 +2,12 @@
 
 ## 1. Limitações Conhecidas de Hardware e SDK (Meta Quest 3S)
 
-1. **Cobertura Física da Depth API vs. Oclusão fora do Frustum (`v0.3.0`):**
+1. **Cobertura Física da Depth API vs. Oclusão fora do Frustum (`v0.3.1`):**
    - O Quest 3S possui câmeras de profundidade voltadas para a **frente** (e não câmeras 360° ou apontadas diretamente abaixo da vertical `-90°` quando o usuário olha para o horizonte).
-   - O detector `EnvironmentDepthLegDetector` utiliza uma grade de escaneamento frontal (`11×8`, `-36°..+36°` horizontal, `-46°..+6°` vertical, alcance `0,20–2,3 m`). Portanto:
-     - **Detecta diretamente em 3D (`DEPTH_3D`):** chutes frontais/diagonais, elevação frontal de joelhos e pés erguidos à frente (especialmente ao olhar levemente para baixo ou ao chutar acima de ~25°).
+   - O detector `EnvironmentDepthLegDetector` utiliza uma grade de escaneamento frontal (`13×10`, `-34°..+34°` horizontal, `-52°..+2°` vertical, detecção ativa dentro do alcance anatômico `0,20 m .. coxa+canela+0,07 m` com aprendizado contínuo de fundo até `2,8 m`). Portanto:
+     - **Detecta diretamente em 3D (`DEPTH_3D`):** chutes esticados frontais/diagonais, joelho erguido dobrado e pés elevados à frente em ambas as pernas (Esquerda e Direita).
      - **Não observa diretamente (`SdkEstimatedGenerativeLegs`):** chutes para trás das costas, aberturas laterais extremas fora do FOV das câmeras, ou pés diretamente sob a vertical ao olhar para o teto. Nesses momentos, a engine retorna suavemente (`~0,18 s`) para `Generative Legs + IK`.
-   - Objetos móveis não presentes no escaneamento de ambiente podem gerar falsos positivos se estiverem exatamente no alcance das pernas (`0,2–1,1 m`); para eliminar cadeiras/mesas próximas, recomenda-se usar **CAPTURAR FUNDO DEPTH (1,5s)** (ou clique no **Analógico Esquerdo**) olhando para a área livre antes dos chutes.
+   - Em cômodos apertados com paredes/móveis próximos (< `1,0 m`), o aprendizado contínuo de voxels estáticos, o filtro planar e o MRUK reduzem drasticamente detecções fantasmas; caso algum móvel apareça pela primeira vez já dentro do alcance da perna, usar **CAPTURAR FUNDO DEPTH (1,5s)** (ou clique no **Analógico Esquerdo**) fixa o ambiente imediatamente.
 
 2. **Ausência de câmeras ópticas dedicadas aos pés (`OVRBody`):**
    - As juntas inferiores (`70..83`: quadris/coxas, joelhos, tornozelos e pontas dos pés) do `OVRBody` são inferidas pelo modelo **Generative Legs** da Meta (`SdkEstimatedGenerativeLegs`). O modo **Depth Leg Fusion (`v0.3.0`)** complementa essa limitação sempre que a perna entra no campo visual das câmeras frontais.
@@ -34,10 +34,10 @@
 - Compilado `VirtualFootTracking_v0.2_Engine.apk` (`46,51 MB`) e validado no Quest 3S (~90% de precisão em caminhada/apoio no piso, confirmando que `Generative Legs` não enxergava chutes nem elevação isolada de joelhos).
 - **Solver Biomecânico & IK (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`) + Kalman Adaptativo + UI VR completa.**
 
-### Etapa 3 — Detecção Física de Chutes & Joelhos via Depth API (**Implementada em `v0.3.0-depth`**)
-- **`EnvironmentDepthLegDetector`:** Raycasting Depth em tempo real (`EnvironmentRaycastManager`), subtração de piso/tronco/braços/mãos/móveis e extração de alvo de pé/chute/joelho erguido.
+### Etapa 3 — Detecção Física de Chutes & Joelhos via Depth API (**Implementada em `v0.3.0-depth` e corrigida em `v0.3.1-depth`**)
+- **`EnvironmentDepthLegDetector` (`v0.3.1`):** Base bilateral sem rotação lateral de osso (`Left` e `Right` independentes), aprendizado contínuo automático de fundo estático (`_autoStaticVoxels`), filtro de parede planar + MRUK, clusterização no plano sagital da perna e diferenciação entre chute esticado vs. joelho dobrado.
 - **Fusão Multi-Sensor no `ProprietaryFootTrackingSolver`:** destravamento automático do piso (`IsFootLocked = false`) e proveniência **`TrackingDataSource.DepthObserved` (`DEPTH_3D`, Amarelo)**.
-- **Visualização & UI:** nuvem 3D ao vivo de pontos de profundidade nas pernas e botões de captura de fundo estático no headset.
+- **Visualização & UI:** nuvem 3D ao vivo de pontos de profundidade nas pernas (`136` pontos) e botões de captura/limpeza de fundo estático no headset.
 
 ### Etapa 4 — Streaming PC + Driver SteamVR OpenVR
 - Implementar `UdpTrackerOutput` (Wi-Fi UDP baixa latência + fallback USB `adb forward`) serializando `TrackerPacketFrame` (`VFT1`).

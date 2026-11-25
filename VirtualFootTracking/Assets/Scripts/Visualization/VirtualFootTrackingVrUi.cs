@@ -228,7 +228,7 @@ namespace VirtualFootTracking.Visualization
         private void BuildTopNavBar()
         {
             RectTransform bar = CreatePanel(_canvasRect, "TopNavBar", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -66f), new Vector2(-16f, -12f), new Color(0.06f, 0.11f, 0.18f, 0.95f));
-            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.3 DEPTH</color></b>", 19, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
+            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.3.1 DEPTH</color></b>", 19, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
 
             CreateButton(bar, "NavMenu", "MENU", new Vector2(0.37f, 0.12f), new Vector2(0.47f, 0.88f), new Color(0.14f, 0.24f, 0.36f), () => SetScreen(VrUiScreen.MainMenu), 15);
             CreateButton(bar, "NavLive", "LIVE", new Vector2(0.48f, 0.12f), new Vector2(0.58f, 0.88f), new Color(0.10f, 0.42f, 0.32f), () => SetScreen(VrUiScreen.LiveTracking), 15);

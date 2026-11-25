@@ -13,8 +13,10 @@ namespace VirtualFootTracking.Visualization
     public class SkeletonAndTrackerVisualizer : MonoBehaviour
     {
         private const int MaxFullBodyJoints = 84;
-        private const int MaxDepthPoints = 96;
+        private const int MaxDepthPoints = 136;
         private const int HipsJointIndex = 1;
+        private const int LeftArmUpperIndex = 10;
+        private const int RightArmUpperIndex = 15;
         private const int LeftUpperLegIndex = 70;
         private const int RightUpperLegIndex = 77;
         private const int GroundRingSegments = 20;
@@ -593,7 +595,23 @@ namespace VirtualFootTracking.Visualization
 
                 if (skeleton.TryGetJoint(HipsJointIndex, out BodyJointSample hips) && hips.PositionValid)
                 {
-                    Vector3 right = hips.OrientationValid ? (hips.WorldRotation * Vector3.right) : Vector3.right;
+                    Vector3 right = Vector3.zero;
+                    if (skeleton.TryGetJoint(LeftArmUpperIndex, out BodyJointSample lArm) && lArm.PositionValid &&
+                        skeleton.TryGetJoint(RightArmUpperIndex, out BodyJointSample rArm) && rArm.PositionValid)
+                    {
+                        Vector3 span = Vector3.ProjectOnPlane(rArm.WorldPosition - lArm.WorldPosition, Vector3.up);
+                        if (span.sqrMagnitude > 0.08f * 0.08f)
+                            right = span.normalized;
+                    }
+                    if (right.sqrMagnitude < 0.001f && Camera.main != null)
+                    {
+                        Vector3 camRight = Vector3.ProjectOnPlane(Camera.main.transform.right, Vector3.up);
+                        if (camRight.sqrMagnitude > 0.001f)
+                            right = camRight.normalized;
+                    }
+                    if (right.sqrMagnitude < 0.001f)
+                        right = Vector3.right;
+
                     return hips.WorldPosition + right * sideOffset;
                 }
             }
