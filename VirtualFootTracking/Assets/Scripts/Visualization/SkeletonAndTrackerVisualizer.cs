@@ -13,7 +13,7 @@ namespace VirtualFootTracking.Visualization
     public class SkeletonAndTrackerVisualizer : MonoBehaviour
     {
         private const int MaxFullBodyJoints = 84;
-        private const int MaxDepthPoints = 136;
+        private const int MaxDepthPoints = 160;
         private const int HipsJointIndex = 1;
         private const int LeftArmUpperIndex = 10;
         private const int RightArmUpperIndex = 15;

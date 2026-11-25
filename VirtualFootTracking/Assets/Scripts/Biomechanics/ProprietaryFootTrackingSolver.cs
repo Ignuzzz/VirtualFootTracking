@@ -1,5 +1,6 @@
 using UnityEngine;
 using VirtualFootTracking.Core;
+using VirtualFootTracking.Prediction;
 
 namespace VirtualFootTracking.Biomechanics
 {
@@ -40,6 +41,12 @@ namespace VirtualFootTracking.Biomechanics
         [SerializeField] private float _footLockMaxLeashMeters = 0.09f;
         [SerializeField] private float _maxPlausibleSpeedMps = 20.0f;
 
+        [Header("Depth Fusion Stability")]
+        [SerializeField] private float _depthDropoutHoldSeconds = 0.14f;
+        [SerializeField] private float _depthMinCutoffHz = 2.0f;
+        [SerializeField] private float _depthBetaSpeed = 14.0f;
+        [SerializeField] private float _depthStationaryDeadzoneMeters = 0.012f;
+
         private struct FootState
         {
             public bool HasPrevRaw;
@@ -56,6 +63,11 @@ namespace VirtualFootTracking.Biomechanics
             public bool LastDepthHasKnee;
             public bool LastDepthIsKneeDominant;
             public float LastDepthConfidence;
+            public int ConsecutiveDepthFrames;
+            public float TimeSinceLastDepthHit;
+            public Vector3 DepthFootVelocity;
+            public OneEuroFilter3D DepthFootFilter;
+            public OneEuroFilter3D DepthKneeFilter;
         }
 
         private CalibrationProfile _profile = new CalibrationProfile();
@@ -65,7 +77,7 @@ namespace VirtualFootTracking.Biomechanics
         private FootState _rightState;
         private long _frameIndex;
 
-        public string SolverName => "Phase3.ProprietaryDepthFusionSolver_v0.3.2";
+        public string SolverName => "Phase3.ProprietaryDepthFusionSolver_v0.3.3";
 
         public bool EnableFloorClamp
         {
@@ -272,7 +284,7 @@ namespace VirtualFootTracking.Biomechanics
 
             float localFloorY = QueryFloorY(rawTargetAnkle, defaultFloorY);
 
-            // Depth API real-time leg/kick fusion
+            // Depth API real-time leg/kick fusion with hysteresis, One-Euro filtering & 140 ms dropout hold
             DepthLegObservation depthLeg = isLeft ? _latestDepth.LeftLeg : _latestDepth.RightLeg;
             float dtSafe = Mathf.Max(deltaTime, 0.001f);
             bool depthIndicatesSwing = false;
@@ -287,34 +299,98 @@ namespace VirtualFootTracking.Biomechanics
                     horizFromHip > 0.22f;
             }
 
-            if (_enableDepthLegFusion && _latestDepth.IsReady && depthLeg.IsDetected && (depthIndicatesSwing || !state.IsFootLocked))
+            bool depthValidNow = _enableDepthLegFusion &&
+                                 _latestDepth.IsReady &&
+                                 depthLeg.IsDetected &&
+                                 (depthIndicatesSwing || !state.IsFootLocked);
+
+            if (depthValidNow)
             {
-                if (state.DepthBlendWeight <= 0.001f)
+                state.ConsecutiveDepthFrames++;
+                state.TimeSinceLastDepthHit = 0f;
+
+                bool confirmedEntry = state.DepthBlendWeight > 0.25f ||
+                                      state.ConsecutiveDepthFrames >= 2 ||
+                                      depthLeg.PointCount >= 5;
+
+                if (confirmedEntry)
                 {
-                    state.LastDepthFootPos = depthLeg.FootWorldPosition;
-                    state.LastDepthKneePos = depthLeg.KneeWorldPosition;
-                }
-                else
-                {
-                    float smoothT = Mathf.Clamp01(dtSafe * 28f);
-                    state.LastDepthFootPos = Vector3.Lerp(state.LastDepthFootPos, depthLeg.FootWorldPosition, smoothT);
+                    if (state.DepthBlendWeight <= 0.001f)
+                    {
+                        state.DepthFootFilter.Reset();
+                        state.DepthKneeFilter.Reset();
+                        state.LastDepthFootPos = depthLeg.FootWorldPosition;
+                        state.LastDepthKneePos = depthLeg.KneeWorldPosition;
+                        state.DepthFootVelocity = Vector3.zero;
+                    }
+
+                    Vector3 prevFiltered = state.LastDepthFootPos;
+                    state.LastDepthFootPos = state.DepthFootFilter.Filter(
+                        depthLeg.FootWorldPosition,
+                        dtSafe,
+                        _depthMinCutoffHz,
+                        _depthBetaSpeed,
+                        1.5f,
+                        _depthStationaryDeadzoneMeters);
+
+                    Vector3 rawVel = (state.LastDepthFootPos - prevFiltered) / dtSafe;
+                    state.DepthFootVelocity = Vector3.ClampMagnitude(
+                        Vector3.Lerp(state.DepthFootVelocity, rawVel, Mathf.Clamp01(dtSafe * 18f)),
+                        8.0f);
+
                     if (depthLeg.HasKneeHint)
                     {
-                        state.LastDepthKneePos = state.LastDepthHasKnee
-                            ? Vector3.Lerp(state.LastDepthKneePos, depthLeg.KneeWorldPosition, smoothT)
-                            : depthLeg.KneeWorldPosition;
+                        if (!state.LastDepthHasKnee)
+                        {
+                            state.DepthKneeFilter.Reset();
+                        }
+                        state.LastDepthKneePos = state.DepthKneeFilter.Filter(
+                            depthLeg.KneeWorldPosition,
+                            dtSafe,
+                            _depthMinCutoffHz,
+                            _depthBetaSpeed,
+                            1.5f,
+                            _depthStationaryDeadzoneMeters);
                     }
-                }
 
-                state.LastDepthHasKnee = depthLeg.HasKneeHint;
-                state.LastDepthIsKneeDominant = depthLeg.IsKneeDominant;
-                state.LastDepthConfidence = depthLeg.Confidence;
-                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 1f, dtSafe * 12.0f);
+                    state.LastDepthHasKnee = depthLeg.HasKneeHint;
+                    state.LastDepthIsKneeDominant = depthLeg.IsKneeDominant;
+                    state.LastDepthConfidence = depthLeg.Confidence;
+                    state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 1f, dtSafe * 16.0f);
+                }
             }
             else
             {
-                state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 0f, dtSafe * 5.5f);
+                state.ConsecutiveDepthFrames = 0;
+                state.TimeSinceLastDepthHit += dtSafe;
+
+                if (_enableDepthLegFusion &&
+                    state.DepthBlendWeight > 0.25f &&
+                    state.TimeSinceLastDepthHit <= _depthDropoutHoldSeconds)
+                {
+                    // Short 140 ms dropout hold with exponentially damped velocity to eliminate frame-drop flicker
+                    state.DepthFootVelocity *= Mathf.Exp(-12f * dtSafe);
+                    state.LastDepthFootPos += state.DepthFootVelocity * dtSafe;
+                    if (state.LastDepthFootPos.y < localFloorY + ankleHeightOffset)
+                    {
+                        state.LastDepthFootPos.y = localFloorY + ankleHeightOffset;
+                    }
+                }
+                else
+                {
+                    state.DepthBlendWeight = Mathf.MoveTowards(state.DepthBlendWeight, 0f, dtSafe * 5.0f);
+                    state.DepthFootVelocity = Vector3.zero;
+                    if (state.DepthBlendWeight <= 0.001f)
+                    {
+                        state.DepthFootFilter.Reset();
+                        state.DepthKneeFilter.Reset();
+                    }
+                }
             }
+
+            bool holdingDropout = _enableDepthLegFusion &&
+                                  state.DepthBlendWeight > 0.25f &&
+                                  state.TimeSinceLastDepthHit <= _depthDropoutHoldSeconds;
 
             bool depthDrivingLeg = _enableDepthLegFusion && state.DepthBlendWeight > 0.01f;
             if (depthDrivingLeg)
@@ -345,7 +421,7 @@ namespace VirtualFootTracking.Biomechanics
             float rawSoleClearance = rawTargetAnkle.y - ankleHeightOffset - localFloorY;
 
             // Hysteresis state machine for Stance (locked to floor) vs Swing (free 3D motion).
-            bool allowFloorLock = _enableFootLocking && hasSdkAnkle && !(state.DepthBlendWeight > 0.15f && depthIndicatesSwing);
+            bool allowFloorLock = _enableFootLocking && hasSdkAnkle && !(state.DepthBlendWeight > 0.15f && (depthIndicatesSwing || holdingDropout));
             if (!allowFloorLock)
             {
                 state.IsFootLocked = false;

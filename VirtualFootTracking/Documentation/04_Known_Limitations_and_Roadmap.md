@@ -2,9 +2,9 @@
 
 ## 1. Limitações Conhecidas de Hardware e SDK (Meta Quest 3S)
 
-1. **Cobertura Física da Depth API vs. Oclusão fora do Frustum (`v0.3.2`):**
+1. **Cobertura Física da Depth API vs. Oclusão fora do Frustum (`v0.3.3`):**
    - O Quest 3S possui câmeras de profundidade voltadas para a **frente** (e não câmeras 360° ou apontadas diretamente abaixo da vertical `-90°` quando o usuário olha para o horizonte).
-   - O detector `EnvironmentDepthLegDetector` utiliza uma grade de escaneamento frontal (`13×10`, `-34°..+34°` horizontal, `-52°..+2°` vertical, detecção ativa dentro do alcance anatômico `0,20 m .. coxa+canela+0,22 m` com aprendizado contínuo de fundo além de `+0,30 m` até `2,8 m`). Portanto:
+   - O detector `EnvironmentDepthLegDetector` utiliza varredura em **2 passagens** (Passo 1 grosso `9×7` no frustum `-36°..+36°` H × `-54°..+4°` V + Passo 2 fino `3×9` focado nas pernas ativas, alcance anatômico `0,20 m .. coxa+canela+0,22 m` e aprendizado de fundo além de `+0,30 m` até `2,8 m`). Portanto:
      - **Detecta diretamente em 3D (`DEPTH_3D`):** chutes esticados frontais/diagonais, joelho erguido dobrado e pés elevados à frente em ambas as pernas (Esquerda e Direita).
      - **Não observa diretamente (`SdkEstimatedGenerativeLegs`):** chutes para trás das costas, aberturas laterais extremas fora do FOV das câmeras, ou pés diretamente sob a vertical ao olhar para o teto. Nesses momentos, a engine retorna suavemente (`~0,18 s`) para `Generative Legs + IK`.
    - Em cômodos apertados com paredes/móveis próximos (< `1,0 m`), o aprendizado contínuo de voxels estáticos, o filtro planar e o MRUK reduzem drasticamente detecções fantasmas; caso algum móvel apareça pela primeira vez já dentro do alcance da perna, usar **CAPTURAR FUNDO DEPTH (1,5s)** (ou clique no **Analógico Esquerdo**) fixa o ambiente imediatamente.
@@ -34,8 +34,9 @@
 - Compilado `VirtualFootTracking_v0.2_Engine.apk` (`46,51 MB`) e validado no Quest 3S (~90% de precisão em caminhada/apoio no piso, confirmando que `Generative Legs` não enxergava chutes nem elevação isolada de joelhos).
 - **Solver Biomecânico & IK (`ProprietaryFootTrackingSolver` + `AnalyticLegIkSolver`) + Kalman Adaptativo + UI VR completa.**
 
-### Etapa 3 — Detecção Física de Chutes & Joelhos via Depth API (**Concluída/Corrigida em `v0.3.2-depth`**)
-- **`EnvironmentDepthLegDetector` (`v0.3.2`):** Base bilateral sem rotação lateral de osso (`Left` e `Right` independentes), proteção MRUK livre de `GLOBAL_MESH` (`WallAnchors` por plano + móveis explícitos), aprendizado seguro além de `maxLegReach + 0,30 m`, clusterização no plano sagital com diferenciação entre chute esticado vs. joelho dobrado e contadores transparentes `Rej[Fl/Rch/Arm/Bg/Mrk]` na UI VR.
+### Etapa 3 — Detecção Física de Chutes & Joelhos via Depth API (**Concluída/Refinada em `v0.3.3-depth`**)
+- **`EnvironmentDepthLegDetector` (`v0.3.3`):** Base bilateral sem rotação lateral de osso (`Left` e `Right` independentes), sonda fina 2-pass (`9×7 + 3×9`), proteção MRUK livre de `GLOBAL_MESH`, transição contínua entre joelho dobrado e estendido + **extensão colinear** da canela para chutes rápidos.
+- **Anti-Flicker Multi-Estágio (`v0.3.3`):** `OneEuroFilter3D` + histerese de entrada + *dropout hold* de `140 ms` no `ProprietaryFootTrackingSolver` + `R` adaptativo para Depth no `AdaptiveKalmanMotionPredictor`.
 - **Fusão Multi-Sensor no `ProprietaryFootTrackingSolver`:** destravamento automático do piso (`IsFootLocked = false`) e proveniência **`TrackingDataSource.DepthObserved` (`DEPTH_3D`, Amarelo)**.
 - **Visualização & UI:** nuvem 3D ao vivo de pontos de profundidade nas pernas (`136` pontos) e botões de captura/limpeza de fundo estático no headset.
 

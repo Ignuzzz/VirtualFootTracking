@@ -15,6 +15,7 @@ namespace VirtualFootTracking.Prediction
         [SerializeField] private float _stationaryProcessNoiseQ = 0.25f;
         [SerializeField] private float _combatProcessNoiseQ = 320.0f;
         [SerializeField] private float _measurementNoiseR = 0.00015f;
+        [SerializeField] private float _depthMeasurementNoiseR = 0.0018f;
         [SerializeField] private float _maxPredictionHorizonSeconds = 0.35f;
         [SerializeField] private float _velocityDampingPerSec = 6.0f;
         [SerializeField] private bool _clampPredictedToFloor = true;
@@ -144,10 +145,19 @@ namespace VirtualFootTracking.Prediction
             float p01Pred = s.P01 + dt * s.P11 + q * 0.5f * dt3;
             float p11Pred = s.P11 + q * dt2;
 
-            // Increase measurement noise slightly when input is degraded/fallback
-            float r = input.Validity == TrackerValidityState.Degraded
-                ? _measurementNoiseR * 2.5f
-                : _measurementNoiseR;
+            // Increase measurement noise slightly when input is degraded/fallback, and adaptively damp stationary Depth jitter
+            bool isDepth = input.Source == TrackingDataSource.DepthObserved;
+            float r;
+            if (isDepth)
+            {
+                r = Mathf.Lerp(_depthMeasurementNoiseR, _measurementNoiseR * 3.0f, activity);
+            }
+            else
+            {
+                r = input.Validity == TrackerValidityState.Degraded
+                    ? _measurementNoiseR * 2.5f
+                    : _measurementNoiseR;
+            }
 
             // 2. Measurement update
             float sCov = Mathf.Max(1e-6f, p00Pred + r);
@@ -157,11 +167,16 @@ namespace VirtualFootTracking.Prediction
             Vector3 pUpdated = pPred + k0 * innovVec;
             Vector3 vUpdated = Vector3.ClampMagnitude(vPred + k1 * innovVec, 22f);
 
-            // Keep foot-locked stance crisp without filter lag
+            // Keep foot-locked stance crisp without filter lag, and hold stationary Depth poses steady
             if (input.IsFootLocked && innovMag < 0.015f)
             {
                 pUpdated = input.Position;
                 vUpdated = Vector3.zero;
+            }
+            else if (isDepth && innovMag < 0.008f && speedMag < 0.18f)
+            {
+                pUpdated = s.Position;
+                vUpdated = s.Velocity * 0.4f;
             }
 
             if ((input.FloorClamped || _clampPredictedToFloor) && pUpdated.y < minY)
@@ -169,7 +184,7 @@ namespace VirtualFootTracking.Prediction
                 pUpdated.y = minY;
             }
 
-            float rotRate = Mathf.Lerp(14f, 40f, activity);
+            float rotRate = isDepth ? Mathf.Lerp(8f, 24f, activity) : Mathf.Lerp(14f, 40f, activity);
             Quaternion qUpdated = Quaternion.Slerp(s.Rotation, input.Rotation, Mathf.Clamp01(rotRate * dt));
 
             s.Position = pUpdated;

@@ -33,7 +33,7 @@
 | **Licença Unity (Unity ID)** | Ausente | **Ativa** | Conta Unity (`brunoviciobr@gmail.com`) | `Unity Personal` (`Assigned`) |
 | **APK Diagnóstico Quest 3S (Fase 1)** | Ausente | **Validado (`v0.1.0`)** | `Builds\VirtualFootTracking_v0.1_Diag.apk` (`46,46 MB`) | Validado no Quest 3S real pelo usuário |
 | **APK Foot Tracking Engine (Fase 2)** | Ausente | **Validado (`v0.2.0`)** | `Builds\VirtualFootTracking_v0.2_Engine.apk` (`46,51 MB`) | Validado no Quest 3S (~90% precisão piso/caminhada; chutes exigiram Depth API) |
-| **APK Depth + Engine Fusion (Fase 3)** | Ausente | **Hotfix Validado (`aapt2` `v0.3.2`)** | `Builds\VirtualFootTracking_v0.3.2_DepthFix2.apk` (`46,54 MB`) | `versionName=0.3.2`, `versionCode=5`, `arm64-v8a`, `BODY_TRACKING`, `USE_SCENE`, `UnityPlayerGameActivity` (`enabled=true`) |
+| **APK Depth + Engine Fusion (Fase 3)** | Ausente | **Refinado (`aapt2` `v0.3.3`)** | `Builds\VirtualFootTracking_v0.3.3_DepthSmooth.apk` (`46,54 MB`) | `versionName=0.3.3`, `versionCode=6`, `arm64-v8a`, `BODY_TRACKING`, `USE_SCENE`, `UnityPlayerGameActivity` (`enabled=true`) |
 | **Meta Quest 3S via USB/ADB** | Desconectado | **Não conectado** | `adb devices -l` -> lista vazia | Necessário conectar cabo USB, ativar Modo Desenvolvedor e autorizar depuração RSA no headset |
 
 ---
