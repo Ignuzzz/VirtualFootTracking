@@ -37,6 +37,11 @@ namespace VirtualFootTracking.Core
         public int DepthForegroundPointCount;
         public int DepthLeftHits;
         public int DepthRightHits;
+        public int DepthRejFloor;
+        public int DepthRejReach;
+        public int DepthRejArm;
+        public int DepthRejBgVox;
+        public int DepthRejMruk;
         public string DepthStatusMessage;
         public string StatusMessage;
         public string[] RecentErrors;

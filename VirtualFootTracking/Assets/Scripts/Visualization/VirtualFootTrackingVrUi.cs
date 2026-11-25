@@ -228,7 +228,7 @@ namespace VirtualFootTracking.Visualization
         private void BuildTopNavBar()
         {
             RectTransform bar = CreatePanel(_canvasRect, "TopNavBar", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -66f), new Vector2(-16f, -12f), new Color(0.06f, 0.11f, 0.18f, 0.95f));
-            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.3.1 DEPTH</color></b>", 19, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
+            CreateText(bar, "Title", "<b><color=#5CE1E6>VIRTUAL FOOT TRACKING v0.3.2 DEPTH</color></b>", 19, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.36f, 1f), new Vector2(14f, 0f), Vector2.zero);
 
             CreateButton(bar, "NavMenu", "MENU", new Vector2(0.37f, 0.12f), new Vector2(0.47f, 0.88f), new Color(0.14f, 0.24f, 0.36f), () => SetScreen(VrUiScreen.MainMenu), 15);
             CreateButton(bar, "NavLive", "LIVE", new Vector2(0.48f, 0.12f), new Vector2(0.58f, 0.88f), new Color(0.10f, 0.42f, 0.32f), () => SetScreen(VrUiScreen.LiveTracking), 15);
@@ -512,7 +512,7 @@ namespace VirtualFootTracking.Visualization
 
             _sb.Clear();
             _sb.AppendLine($"FPS: <b>{diag.Fps:F0}</b> | Hz: <b>{diag.TrackingUpdateHz:F0}</b> | Lat: <b>{diag.SolverLatencyMs:F2}ms</b> | Chao: {diag.FloorSource} ({diag.FloorWorldY:F2}m)");
-            _sb.AppendLine($"Depth 3D: {dStat} | FgPts=<b>{diag.DepthForegroundPointCount}</b> (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Raw={diag.DepthRawHitCount} | Fundo={diag.DepthBaselineVoxelCount} vox");
+            _sb.AppendLine($"Depth 3D: {dStat} | Fg=<b>{diag.DepthForegroundPointCount}</b> (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Raw={diag.DepthRawHitCount} | Rej[Fl={diag.DepthRejFloor} Rch={diag.DepthRejReach} Arm={diag.DepthRejArm} Bg={diag.DepthRejBgVox} Mrk={diag.DepthRejMruk}]");
             AppendLiveRow("LF", diag.CurrentFrame.LeftFoot, "RF", diag.CurrentFrame.RightFoot);
             AppendLiveRow("LK", diag.CurrentFrame.LeftKnee, "RK", diag.CurrentFrame.RightKnee);
             _liveTrackersSummaryText.text = _sb.ToString();
@@ -532,7 +532,7 @@ namespace VirtualFootTracking.Visualization
             _sb.AppendLine($"Perms -> BODY_TRACKING: {(diag.BodyPermissionGranted ? "<color=#49E870>OK</color>" : "<color=#FF5555>NEGADA</color>")} | USE_SCENE: {(diag.ScenePermissionGranted ? "<color=#49E870>OK</color>" : "<color=#FF5555>NEGADA</color>")}");
             _sb.AppendLine($"Body -> {(diag.BodyTrackingActive ? "ATIVO" : "INATIVO")} | {diag.BodyFidelity} | Calib={diag.BodyCalibration} | Conf={diag.BodyConfidence:F2} | Perdas={diag.TrackingLossEventsCount}");
             _sb.AppendLine($"Floor -> {diag.FloorSource} | Y={diag.FloorWorldY:F3}m | Ancoras={diag.FloorAnchorCount} | {diag.StatusMessage}");
-            _sb.AppendLine($"Depth -> Sup={diag.DepthSupported} Ready={diag.DepthReady} Fusion={diag.DepthFusionEnabled} | Raw={diag.DepthRawHitCount} Fg={diag.DepthForegroundPointCount} (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Fundo={diag.DepthBaselineVoxelCount} vox | {diag.DepthStatusMessage}");
+            _sb.AppendLine($"Depth -> Sup={diag.DepthSupported} Ready={diag.DepthReady} Fusion={diag.DepthFusionEnabled} | Raw={diag.DepthRawHitCount} Fg={diag.DepthForegroundPointCount} (L={diag.DepthLeftHits} R={diag.DepthRightHits}) | Rej[Fl={diag.DepthRejFloor} Rch={diag.DepthRejReach} Arm={diag.DepthRejArm} Bg={diag.DepthRejBgVox} Mrk={diag.DepthRejMruk}] | BgVox={diag.DepthBaselineVoxelCount}");
             _sb.AppendLine("----------------------------------------------------------------------------------------");
             _sb.AppendLine("<b>ID      POSICAO (X, Y, Z)       VEL(m/s)   CHAO dY   FLAGS           FONTE     ESTADO</b>");
             AppendDiagRow("L-FOOT", diag.CurrentFrame.LeftFoot);

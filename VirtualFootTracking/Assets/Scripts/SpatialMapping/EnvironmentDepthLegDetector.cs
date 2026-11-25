@@ -34,8 +34,14 @@ namespace VirtualFootTracking.SpatialMapping
         private const int LeftUpperLegIndex = 70;
         private const int RightUpperLegIndex = 77;
 
-        private static readonly LabelFilter NonFloorCeilingFilter =
-            new LabelFilter(~(MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING));
+        private const MRUKAnchor.SceneLabels FurnitureLabelsMask =
+            MRUKAnchor.SceneLabels.TABLE |
+            MRUKAnchor.SceneLabels.COUCH |
+            MRUKAnchor.SceneLabels.BED |
+            MRUKAnchor.SceneLabels.STORAGE |
+            MRUKAnchor.SceneLabels.SCREEN |
+            MRUKAnchor.SceneLabels.LAMP |
+            MRUKAnchor.SceneLabels.PLANT;
 
         [Header("Scene References")]
         [SerializeField] private EnvironmentRaycastManager _raycastManager;
@@ -207,7 +213,7 @@ namespace VirtualFootTracking.SpatialMapping
             float thighLen = Mathf.Max(0.22f, cfg.ThighLengthMeters);
             float shinLen = Mathf.Max(0.22f, cfg.ShinLengthMeters);
             float ankleHeight = Mathf.Max(0.03f, cfg.AnkleToFloorMeters);
-            float maxLegReach = thighLen + shinLen + 0.07f;
+            float maxLegReach = thighLen + shinLen + 0.22f;
 
             // Background baseline calibration mode
             if (_backgroundCaptureRemaining > 0f)
@@ -292,70 +298,78 @@ namespace VirtualFootTracking.SpatialMapping
 
                     // Layer 1: Floor & low carpet subtraction
                     if (pt.y <= floorY + _floorClearanceMeters)
+                    {
+                        frame.RejFloorCount++;
                         continue;
+                    }
 
                     Vector3 fromPelvis = pt - pelvisPos;
                     float distFromPelvis = fromPelvis.magnitude;
 
-                    // Continuous automatic static environment learning beyond physical leg reach
-                    if (distFromPelvis > maxLegReach + 0.08f)
+                    // Continuous automatic static environment learning safely outside max physical leg/shoe reach
+                    if (distFromPelvis > maxLegReach + 0.30f)
                     {
                         if (pt.y > floorY + 0.08f && _autoStaticVoxels.Count < MaxAutoStaticVoxels)
                         {
                             _autoStaticVoxels.Add(ToVoxel(pt, invVoxel));
                         }
+                        frame.RejReachCount++;
                         continue;
                     }
 
                     // Layer 2: Upper-body / chest subtraction
                     if (pt.y >= pelvisPos.y + _pelvisUpperMarginMeters)
+                    {
+                        frame.RejReachCount++;
                         continue;
+                    }
 
-                    // Layer 3: Tight anatomical leg reach envelope
+                    // Layer 3: Anatomical leg + shoe reach envelope
                     if (distFromPelvis < _minDistFromPelvisMeters || distFromPelvis > maxLegReach)
+                    {
+                        frame.RejReachCount++;
                         continue;
+                    }
 
                     if (Vector3.Dot(fromPelvis, pelvisForwardFlat) < -0.18f)
+                    {
+                        frame.RejReachCount++;
                         continue;
+                    }
 
                     float lateral = Vector3.Dot(fromPelvis, pelvisRightFlat);
                     if (Mathf.Abs(lateral) > 0.56f)
+                    {
+                        frame.RejReachCount++;
                         continue;
+                    }
 
                     // Layer 4: Arms, wrists, hands, controllers exclusion
-                    if (hasLeftHand && (pt - leftHandPos).sqrMagnitude <= handExclSqr)
+                    if ((hasLeftHand && (pt - leftHandPos).sqrMagnitude <= handExclSqr) ||
+                        (hasRightHand && (pt - rightHandPos).sqrMagnitude <= handExclSqr) ||
+                        (hasLArmUp &&
+                         (PointToSegmentSqrDistance(pt, lArmUp, lArmLow) <= armExclSqr ||
+                          PointToSegmentSqrDistance(pt, lArmLow, lWrist) <= armExclSqr)) ||
+                        (hasRArmUp &&
+                         (PointToSegmentSqrDistance(pt, rArmUp, rArmLow) <= armExclSqr ||
+                          PointToSegmentSqrDistance(pt, rArmLow, rWrist) <= armExclSqr)))
+                    {
+                        frame.RejArmCount++;
                         continue;
-                    if (hasRightHand && (pt - rightHandPos).sqrMagnitude <= handExclSqr)
-                        continue;
+                    }
 
-                    if (hasLArmUp &&
-                        (PointToSegmentSqrDistance(pt, lArmUp, lArmLow) <= armExclSqr ||
-                         PointToSegmentSqrDistance(pt, lArmLow, lWrist) <= armExclSqr))
-                        continue;
-
-                    if (hasRArmUp &&
-                        (PointToSegmentSqrDistance(pt, rArmUp, rArmLow) <= armExclSqr ||
-                         PointToSegmentSqrDistance(pt, rArmLow, rWrist) <= armExclSqr))
-                        continue;
-
-                    // Layer 5: Static room environment (manual baseline + auto-learned voxels + MRUK room/surface shells)
+                    // Layer 5: Static room environment (manual baseline + safe auto-learned voxels + explicit MRUK wall planes / furniture volumes)
                     Vector3Int ptVoxel = ToVoxel(pt, invVoxel);
                     if (_staticBackgroundVoxels.Contains(ptVoxel) || _autoStaticVoxels.Contains(ptVoxel))
-                        continue;
-
-                    if (room != null)
                     {
-                        if (!room.IsPositionInRoom(pt, testVerticalBounds: true))
-                            continue;
+                        frame.RejBgVoxelCount++;
+                        continue;
+                    }
 
-                        if (room.IsPositionInSceneVolume(pt, out MRUKAnchor volumeAnchor, true, 0.09f) &&
-                            volumeAnchor != null &&
-                            !volumeAnchor.HasAnyLabel(MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING))
-                            continue;
-
-                        float surfDist = room.TryGetClosestSurfacePosition(pt, out _, out MRUKAnchor closestAnchor, NonFloorCeilingFilter);
-                        if (closestAnchor != null && surfDist <= 0.14f)
-                            continue;
+                    if (IsNearMrukWallOrFurniture(room, pt))
+                    {
+                        frame.RejMrukCount++;
+                        continue;
                     }
 
                     // Surviving foreground point -> assign Left (-1) vs Right (+1) along corrected pelvisRightFlat
@@ -621,15 +635,14 @@ namespace VirtualFootTracking.SpatialMapping
                 return default;
             }
 
-            // Wide-slab rejection: wider than a single leg -> treat as wall/furniture and bake static voxels
-            if (maxLat - minLat > 0.36f)
+            // Wide-slab rejection for current frame only (never permanently blacklist voxels inside leg reach)
+            if (maxLat - minLat > 0.38f)
             {
-                AutoLearnClusterAsStatic(inlierCount, invVoxel);
                 hasPrev = false;
                 return default;
             }
 
-            // Planar vertical wall rejection even without MRUK room scan
+            // Planar vertical wall rejection for current frame only
             int vertNormCount = 0;
             Vector3 normSum = Vector3.zero;
             for (int i = 0; i < inlierCount; i++)
@@ -643,7 +656,7 @@ namespace VirtualFootTracking.SpatialMapping
             }
 
             if (vertNormCount >= 5 && normSum.sqrMagnitude > 0.2f &&
-                ((maxLat - minLat) > 0.26f || (maxY - minY) > 0.58f))
+                ((maxLat - minLat) > 0.28f || (maxY - minY) > 0.60f))
             {
                 Vector3 planeNormal = normSum.normalized;
                 float minProj = float.MaxValue;
@@ -655,9 +668,8 @@ namespace VirtualFootTracking.SpatialMapping
                     if (proj > maxProj) maxProj = proj;
                 }
 
-                if (maxProj - minProj < 0.055f)
+                if (maxProj - minProj < 0.05f)
                 {
-                    AutoLearnClusterAsStatic(inlierCount, invVoxel);
                     hasPrev = false;
                     return default;
                 }
@@ -785,12 +797,40 @@ namespace VirtualFootTracking.SpatialMapping
             return obs;
         }
 
-        private void AutoLearnClusterAsStatic(int inlierCount, float invVoxel)
+        private static bool IsNearMrukWallOrFurniture(MRUKRoom room, Vector3 pt)
         {
-            for (int i = 0; i < inlierCount && _autoStaticVoxels.Count < MaxAutoStaticVoxels; i++)
+            if (room == null)
+                return false;
+
+            if (room.WallAnchors != null)
             {
-                _autoStaticVoxels.Add(ToVoxel(_inlierBuffer[i], invVoxel));
+                for (int i = 0; i < room.WallAnchors.Count; i++)
+                {
+                    MRUKAnchor wall = room.WallAnchors[i];
+                    if (wall != null && wall.PlaneRect.HasValue)
+                    {
+                        float d = wall.GetClosestSurfacePosition(pt, out _, out _, MRUKAnchor.ComponentType.Plane);
+                        if (d >= 0f && d <= 0.12f)
+                            return true;
+                    }
+                }
             }
+
+            if (room.Anchors != null)
+            {
+                for (int i = 0; i < room.Anchors.Count; i++)
+                {
+                    MRUKAnchor anchor = room.Anchors[i];
+                    if (anchor != null &&
+                        anchor.HasAnyLabel(FurnitureLabelsMask) &&
+                        anchor.IsPositionInVolume(pt, true, 0.05f))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private void ExtractExclusionGeometry(
@@ -927,6 +967,13 @@ namespace VirtualFootTracking.SpatialMapping
             if (pelvisForwardFlat.sqrMagnitude < 0.001f)
             {
                 pelvisForwardFlat = Vector3.forward;
+            }
+
+            Vector3 headFwd = Vector3.ProjectOnPlane(headTransform.forward, Vector3.up);
+            if (headFwd.sqrMagnitude > 0.001f && Vector3.Dot(pelvisForwardFlat, headFwd.normalized) < -0.25f)
+            {
+                pelvisForwardFlat = -pelvisForwardFlat;
+                pelvisRightFlat = -pelvisRightFlat;
             }
 
             if (hasSdkLeftHip && hasSdkRightHip)

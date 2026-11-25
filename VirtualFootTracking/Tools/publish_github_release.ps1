@@ -2,15 +2,15 @@
     [string]$RepoName = "VirtualFootTracking",
     [ValidateSet("public", "private")]
     [string]$Visibility = "public",
-    [string]$Tag = "v0.3.1-depth",
-    [string]$Title = "Virtual Foot Tracking v0.3.1 — Depth Left/Right Fix, Auto Anti-Wall & Straight/Bent Knee"
+    [string]$Tag = "v0.3.2-depth",
+    [string]$Title = "Virtual Foot Tracking v0.3.2 — Fix MRUK GLOBAL_MESH Mask, Shoe Reach & Left/Right Depth"
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $ProjectDir "..")).Path
-$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.3.1_DepthFix.apk"
+$ApkPath = Join-Path $ProjectDir "Builds\VirtualFootTracking_v0.3.2_DepthFix2.apk"
 
 if (-not (Test-Path $ApkPath)) {
     Write-Error "APK not found at $ApkPath. Run .\Tools\build_apk.ps1 first."
@@ -63,14 +63,15 @@ $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = "Stop"
 
 $notes = @'
-Meta Quest 3S Phase 3 Fix (`v0.3.1`) — Correções baseadas no teste real em hardware:
-- **Fix 1 — Separação Real Perna Esquerda vs. Direita (`EnvironmentDepthLegDetector` + `ProprietaryFootTrackingSolver`):**
-  - Corrigido o vetor de orientação da pelve: no skeleton `OVRBody`, `hips.WorldRotation * Vector3.forward` apontava lateralmente e rotulava a perna esquerda como direita. Agora o eixo lateral (`Right - Left`) e frontal (`Cross(Right, Up)`) são calculados diretamente a partir das juntas bilaterais de quadril/braços/ombros, com centro sagital exato entre os quadris.
-- **Fix 2 — Proteção Automática Contra Paredes/Móveis ("Movimentos Ghosts" em Salas Pequenas):**
-  - Verificação contínua via MRUK (`IsPositionInRoom` + `TryGetClosestSurfacePosition <= 0,14 m` para paredes/móveis), aprendizado automático contínuo de voxels estáticos fora do alcance da perna (`_autoStaticVoxels`, `0,11 m`), rejeição de planos verticais planos (paredes sem MRUK) e corredor anatômico mais justo (`coxa + canela + 0,07 m`).
-- **Fix 3 — Joelho Esticado vs. Joelho Dobrado (`Straight vs. Bent Knee`):**
-  - Substituído o filtro esférico centrado na coxa (que descartava canela e pé esticados) por um filtro no plano sagital da perna + extremidade distal suportada real sem puxar de volta para o joelho, com grade ampliada para `13×10` (`130` raios) e `MaxBufferPoints = 136`.
-  - Chutes esticados até a ponta do pé mantêm o joelho reto (`~2°–10°`), enquanto elevação apenas de joelho dobrado aciona `IsKneeDominant`.
+Meta Quest 3S Phase 3 Hotfix (`v0.3.2`) — Corrige a regressão da `v0.3.1` em que nenhum ponto de perna era aceito:
+- **Fix Crítico — MRUK `GLOBAL_MESH` apagava 100% da nuvem Depth:**
+  - `MRUKRoom.TryGetClosestSurfacePosition` incluía `GLOBAL_MESH` (cuja bounding box envolve o cômodo inteiro e retorna distância negativa `<= 0,14 m`), descartando todo ponto dentro da sala.
+  - Substituído por verificação explícita apenas de planos de parede (`room.WallAnchors`, `ComponentType.Plane <= 0,12 m`) e volumes nominais de móveis (`TABLE | COUCH | BED | STORAGE | SCREEN | LAMP | PLANT`).
+- **Fix 2 — Alcance Real de Calçado & Sem Auto-Banimento da Perna:**
+  - `maxLegReach` ampliado para `coxa + canela + 0,22 m` e aprendizado automático de fundo (`_autoStaticVoxels`) só grava pontos além de `maxLegReach + 0,30 m` (nunca gravando o próprio pé).
+  - Rejeição de paredes verticais atua apenas no frame atual.
+- **Fix 3 — Diagnóstico Transparente na UI:**
+  - HUD Live e aba `DIAG` agora exibem os contadores exatos de rejeição (`Rej[Fl=.. Rch=.. Arm=.. Bg=.. Mrk=..]`), além de manter as correções de Esquerda/Direita e Joelho Esticado vs. Dobrado.
 '@
 
 $tmpNotes = [System.IO.Path]::GetTempFileName()

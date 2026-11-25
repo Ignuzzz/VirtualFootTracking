@@ -121,6 +121,11 @@ namespace VirtualFootTracking.Diagnostics
             _latestSnapshot.DepthForegroundPointCount = depth.ForegroundPointCount;
             _latestSnapshot.DepthLeftHits = depth.LeftLeg.PointCount;
             _latestSnapshot.DepthRightHits = depth.RightLeg.PointCount;
+            _latestSnapshot.DepthRejFloor = depth.RejFloorCount;
+            _latestSnapshot.DepthRejReach = depth.RejReachCount;
+            _latestSnapshot.DepthRejArm = depth.RejArmCount;
+            _latestSnapshot.DepthRejBgVox = depth.RejBgVoxelCount;
+            _latestSnapshot.DepthRejMruk = depth.RejMrukCount;
             _latestSnapshot.DepthStatusMessage = depth.StatusMessage ?? string.Empty;
         }
 

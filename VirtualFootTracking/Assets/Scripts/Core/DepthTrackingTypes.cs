@@ -45,6 +45,11 @@ namespace VirtualFootTracking.Core
         public int TotalRaysCast;
         public int RawHitCount;
         public int ForegroundPointCount;
+        public int RejFloorCount;
+        public int RejReachCount;
+        public int RejArmCount;
+        public int RejBgVoxelCount;
+        public int RejMrukCount;
         public DepthForegroundPoint[] ForegroundPoints;
         public DepthLegObservation LeftLeg;
         public DepthLegObservation RightLeg;

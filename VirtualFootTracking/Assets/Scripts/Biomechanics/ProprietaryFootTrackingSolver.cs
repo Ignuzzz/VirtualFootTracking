@@ -65,7 +65,7 @@ namespace VirtualFootTracking.Biomechanics
         private FootState _rightState;
         private long _frameIndex;
 
-        public string SolverName => "Phase3.ProprietaryDepthFusionSolver_v0.3.1";
+        public string SolverName => "Phase3.ProprietaryDepthFusionSolver_v0.3.2";
 
         public bool EnableFloorClamp
         {
@@ -616,7 +616,18 @@ namespace VirtualFootTracking.Biomechanics
             {
                 Vector3 fwd = Vector3.Cross(rightFlat, Vector3.up);
                 if (fwd.sqrMagnitude > 0.001f)
-                    return fwd.normalized;
+                {
+                    fwd.Normalize();
+                    if (Camera.main != null)
+                    {
+                        Vector3 camFwd = Vector3.ProjectOnPlane(Camera.main.transform.forward, Vector3.up);
+                        if (camFwd.sqrMagnitude > 0.001f && Vector3.Dot(fwd, camFwd.normalized) < -0.25f)
+                        {
+                            fwd = -fwd;
+                        }
+                    }
+                    return fwd;
+                }
             }
 
             return Vector3.forward;
