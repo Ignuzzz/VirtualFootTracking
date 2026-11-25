@@ -62,7 +62,7 @@ $ErrorActionPreference = "Continue"
 $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = "Stop"
 
-$notes = @"
+$notes = @'
 Meta Quest 3S Phase 3 Fix (`v0.3.1`) — Correções baseadas no teste real em hardware:
 - **Fix 1 — Separação Real Perna Esquerda vs. Direita (`EnvironmentDepthLegDetector` + `ProprietaryFootTrackingSolver`):**
   - Corrigido o vetor de orientação da pelve: no skeleton `OVRBody`, `hips.WorldRotation * Vector3.forward` apontava lateralmente e rotulava a perna esquerda como direita. Agora o eixo lateral (`Right - Left`) e frontal (`Cross(Right, Up)`) são calculados diretamente a partir das juntas bilaterais de quadril/braços/ombros, com centro sagital exato entre os quadris.
@@ -71,14 +71,25 @@ Meta Quest 3S Phase 3 Fix (`v0.3.1`) — Correções baseadas no teste real em h
 - **Fix 3 — Joelho Esticado vs. Joelho Dobrado (`Straight vs. Bent Knee`):**
   - Substituído o filtro esférico centrado na coxa (que descartava canela e pé esticados) por um filtro no plano sagital da perna + extremidade distal suportada real sem puxar de volta para o joelho, com grade ampliada para `13×10` (`130` raios) e `MaxBufferPoints = 136`.
   - Chutes esticados até a ponta do pé mantêm o joelho reto (`~2°–10°`), enquanto elevação apenas de joelho dobrado aciona `IsKneeDominant`.
-"@
+'@
 
-if ($releaseExists) {
-    Write-Host "Release '$Tag' already exists; uploading/replacing APK asset..."
-    & $gh release upload $Tag $ApkPath --clobber
-} else {
-    Write-Host "Creating GitHub Release '$Tag' and uploading APK..."
-    & $gh release create $Tag $ApkPath --title $Title --notes $notes
+$tmpNotes = [System.IO.Path]::GetTempFileName()
+try {
+    [System.IO.File]::WriteAllText($tmpNotes, $notes, (New-Object System.Text.UTF8Encoding($false)))
+    if ($releaseExists) {
+        Write-Host "Release '$Tag' already exists; uploading/replacing APK asset..."
+        & $gh release upload $Tag $ApkPath --clobber
+    } else {
+        Write-Host "Creating GitHub Release '$Tag' and uploading APK..."
+        & $gh release create $Tag $ApkPath --title $Title --notes-file $tmpNotes
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "gh release failed with exit code $LASTEXITCODE"
+    }
+} finally {
+    if (Test-Path $tmpNotes) {
+        Remove-Item $tmpNotes -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $nwo = (& $gh repo view --json nameWithOwner -q .nameWithOwner).Trim()
